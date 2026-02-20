@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
 	import type { PageData } from './$types';
-	import type { TimerState, Todo, UserSettings, Theme } from '$lib/types';
+	import type { TimerState, UserSettings, Theme, PomodoroLog } from '$lib/types';
 	import { THEMES } from '$lib/types';
 	import { nextInterval } from '$lib/pomodoro';
 	import Calendar from '$lib/Calendar.svelte';
@@ -63,7 +63,6 @@
 	}
 
 	// ── Detail/deadline state ──
-	let expandedId = $state<string | null>(null);
 	let timezoneOffset = $state(0);
 	let deadlineChoice = $state<'none' | 'today' | 'tomorrow' | 'custom'>('none');
 	let customDeadline = $state('');
@@ -97,19 +96,6 @@
 					: ''
 	);
 
-	function expandTodo(todo: Todo) {
-		if (expandedId === todo.id) {
-			expandedId = null;
-			return;
-		}
-		expandedId = todo.id;
-		editDetail = todo.detail ?? '';
-		editDeadlineChoice = todo.deadline ? 'custom' : 'none';
-		editCustomDeadline = todo.deadline
-			? new Date(todo.deadline - timezoneOffset * 60_000).toISOString().slice(0, 16)
-			: '';
-	}
-
 	function formatDeadline(ms: number): string {
 		const d = new Date(ms);
 		const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -132,12 +118,16 @@
 	let syncFormEl: HTMLFormElement;
 	let timerJson = $derived(timer ? JSON.stringify(timer) : 'null');
 
-	// Hydrate from server on mount (server always wins)
+	// Hydrate from server once on mount (server wins on initial load only)
+	let timerHydrated = false;
 	$effect(() => {
+		if (timerHydrated) return;
+		timerHydrated = true;
 		const server: TimerState | null = data.serverTimer;
 		if (server) {
 			timer = server;
 			localStorage.setItem('tiff-timer', JSON.stringify(server));
+			detailTaskId = server.activeTaskId;
 		} else {
 			localStorage.removeItem('tiff-timer');
 		}
@@ -195,6 +185,7 @@
 			completedPomodoros: 0,
 			paused: false
 		});
+		detailTaskId = taskId;
 	}
 
 	function closeTimer() {
@@ -307,6 +298,90 @@
 		const seconds = totalSeconds % 60;
 		return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 	}
+
+	// ── Detail panel state ──
+	let detailTaskId = $state<string | null>(null);
+	let detailOpen = $derived(detailTaskId !== null);
+
+	let detailTodo = $derived(
+		detailTaskId ? [...data.todos, ...data.archivedTodos].find((t) => t.id === detailTaskId) ?? null : null
+	);
+
+	function openDetail(todoId: string) {
+		detailTaskId = todoId;
+		const todo = [...data.todos, ...data.archivedTodos].find((t) => t.id === todoId);
+		if (todo) {
+			editDetail = todo.detail ?? '';
+			editDeadlineChoice = todo.deadline ? 'custom' : 'none';
+			editCustomDeadline = todo.deadline
+				? new Date(todo.deadline - timezoneOffset * 60_000).toISOString().slice(0, 16)
+				: '';
+		}
+	}
+
+	function closeDetail() {
+		detailTaskId = null;
+	}
+
+	// Close detail if the task is deleted
+	$effect(() => {
+		if (detailTaskId && ![...data.todos, ...data.archivedTodos].some((t) => t.id === detailTaskId)) {
+			detailTaskId = null;
+		}
+	});
+
+	// ── Domain auto-detection ──
+	const DOMAIN_LABELS: Record<string, string> = {
+		'github.com': 'GitHub',
+		'docs.google.com': 'Google Docs',
+		'figma.com': 'Figma',
+		'www.figma.com': 'Figma',
+		'notion.so': 'Notion',
+		'www.notion.so': 'Notion',
+		'linear.app': 'Linear',
+		'jira.atlassian.net': 'Jira'
+	};
+
+	function getDomainLabel(url: string): string {
+		try {
+			const hostname = new URL(url).hostname;
+			return DOMAIN_LABELS[hostname] ?? hostname;
+		} catch {
+			return 'Link';
+		}
+	}
+
+	// ── Relative time ──
+	function relativeTime(timestamp: number): string {
+		const diff = Date.now() - timestamp;
+		const mins = Math.floor(diff / 60_000);
+		if (mins < 1) return 'just now';
+		if (mins < 60) return `${mins}m ago`;
+		const hours = Math.floor(mins / 60);
+		if (hours < 24) return `${hours}h ago`;
+		const days = Math.floor(hours / 24);
+		return `${days}d ago`;
+	}
+
+	// ── Pomodoro summary helpers ──
+	function getTaskPomodoros(taskId: string): PomodoroLog[] {
+		return data.pomodoroLogs.filter((l: PomodoroLog) => l.taskId === taskId && l.type === 'work');
+	}
+
+	function formatDuration(ms: number): string {
+		const totalMin = Math.round(ms / 60_000);
+		if (totalMin < 60) return `${totalMin}m`;
+		const h = Math.floor(totalMin / 60);
+		const m = totalMin % 60;
+		return m > 0 ? `${h}h ${m}m` : `${h}h`;
+	}
+
+	function pomodoroSummary(taskId: string): string | null {
+		const logs = getTaskPomodoros(taskId);
+		if (logs.length === 0) return null;
+		const total = logs.reduce((sum, l) => sum + l.duration, 0);
+		return `${logs.length} session${logs.length !== 1 ? 's' : ''} · ${formatDuration(total)}`;
+	}
 </script>
 
 <!-- Hidden form for logging completed pomodoros to the server -->
@@ -356,14 +431,23 @@
 	<input type="hidden" name="theme" value={theme} />
 </form>
 
-<div class="app-layout">
-	<!-- Mobile overlay -->
+<div class="app-layout" class:detail-open={detailOpen}>
+	<!-- Mobile overlay for left sidebar -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="sidebar-overlay"
 		class:visible={sidebarOpen}
 		onclick={closeSidebar}
 		onkeydown={(e) => { if (e.key === 'Escape') closeSidebar(); }}
+	></div>
+
+	<!-- Mobile overlay for detail panel -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="detail-overlay"
+		class:visible={detailOpen}
+		onclick={closeDetail}
+		onkeydown={(e) => { if (e.key === 'Escape') closeDetail(); }}
 	></div>
 
 	<aside class="sidebar" class:open={sidebarOpen}>
@@ -580,6 +664,9 @@
 			{#if data.todos.length > 0}
 				<ul class="todo-list">
 					{#each data.todos as todo (todo.id)}
+						{@const taskPomSummary = pomodoroSummary(todo.id)}
+						{@const resourceCount = todo.resources?.length ?? 0}
+						{@const lastLog = todo.logs?.length ? todo.logs[todo.logs.length - 1] : null}
 						<li
 							class="todo-item"
 							class:done={todo.done}
@@ -599,7 +686,7 @@
 									<span class="status-tag active">[ACTIVE]</span>
 								{/if}
 
-								<span class="todo-title">{todo.title}</span>
+								<button class="todo-title" onclick={() => openDetail(todo.id)}>{todo.title}</button>
 
 								{#if todo.deadline}
 									<span class="deadline-badge" class:overdue={!todo.done && isOverdue(todo.deadline)}>
@@ -617,7 +704,6 @@
 											<button type="submit">ARCHIVE</button>
 										</form>
 									{/if}
-									<button onclick={() => expandTodo(todo)}>EDIT</button>
 									<form method="POST" action="?/delete" use:enhance>
 										<input type="hidden" name="id" value={todo.id} />
 										<button
@@ -631,40 +717,17 @@
 								</div>
 							</div>
 
-							{#if expandedId === todo.id}
-								<div class="todo-detail-panel">
-									{#if todo.detail && expandedId !== todo.id}
-										<p class="detail-text">{todo.detail}</p>
+							{#if taskPomSummary || resourceCount > 0 || lastLog}
+								<div class="task-meta">
+									{#if taskPomSummary}
+										<span class="task-meta-item">{taskPomSummary}</span>
 									{/if}
-									<form
-										method="POST"
-										action="?/update"
-										use:enhance={() => {
-											return async ({ update }) => {
-												await update({ reset: false });
-												expandedId = null;
-											};
-										}}
-									>
-										<input type="hidden" name="id" value={todo.id} />
-										<textarea name="detail" rows="3" placeholder="Add details...">{editDetail}</textarea>
-										<div class="deadline-row">
-											<span class="deadline-label">DEADLINE:</span>
-											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'none'} onclick={() => editDeadlineChoice = 'none'}>NONE</button>
-											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'today'} onclick={() => editDeadlineChoice = 'today'}>TODAY</button>
-											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'tomorrow'} onclick={() => editDeadlineChoice = 'tomorrow'}>TOMORROW</button>
-											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'custom'} onclick={() => editDeadlineChoice = 'custom'}>CUSTOM</button>
-											{#if editDeadlineChoice === 'custom'}
-												<input type="datetime-local" class="deadline-datetime" bind:value={editCustomDeadline} />
-											{/if}
-										</div>
-										<input type="hidden" name="deadline" value={editDeadlineValue} />
-										<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
-										<div class="detail-actions">
-											<button type="submit" class="btn-save">SAVE</button>
-											<button type="button" onclick={() => expandedId = null}>CANCEL</button>
-										</div>
-									</form>
+									{#if resourceCount > 0}
+										<span class="task-meta-item">{resourceCount} link{resourceCount !== 1 ? 's' : ''}</span>
+									{/if}
+									{#if lastLog}
+										<span class="task-meta-item">{lastLog.text.slice(0, 40)}{lastLog.text.length > 40 ? '...' : ''} · {relativeTime(lastLog.createdAt)}</span>
+									{/if}
 								</div>
 							{/if}
 						</li>
@@ -675,4 +738,142 @@
 			{/if}
 		</section>
 	</main>
+
+	{#if detailTodo}
+		{@const detailPomodoros = getTaskPomodoros(detailTodo.id)}
+		<aside class="detail-panel" class:open={detailOpen}>
+			<div class="detail-header">
+				<div class="detail-header-info">
+					<div class="detail-title">{detailTodo.title}</div>
+					<div class="detail-badges">
+						{#if detailTodo.done}
+							<span class="detail-badge done">DONE</span>
+						{:else if timer?.activeTaskId === detailTodo.id}
+							<span class="detail-badge active">ACTIVE</span>
+						{/if}
+						{#if detailTodo.deadline && !detailTodo.done && isOverdue(detailTodo.deadline)}
+							<span class="detail-badge overdue">OVERDUE</span>
+						{/if}
+					</div>
+				</div>
+				<button class="detail-close" onclick={closeDetail}>✕</button>
+			</div>
+
+			<!-- Details (edit) -->
+			<div class="detail-section">
+				<div class="detail-section-title">DETAILS</div>
+				<form
+					class="detail-form"
+					method="POST"
+					action="?/update"
+					use:enhance={() => {
+						return async ({ update }) => {
+							await update({ reset: false });
+						};
+					}}
+				>
+					<input type="hidden" name="id" value={detailTodo.id} />
+					<textarea name="detail" rows="3" placeholder="Add details..." bind:value={editDetail}></textarea>
+					<div class="deadline-row">
+						<span class="deadline-label">DEADLINE:</span>
+						<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'none'} onclick={() => editDeadlineChoice = 'none'}>NONE</button>
+						<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'today'} onclick={() => editDeadlineChoice = 'today'}>TODAY</button>
+						<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'tomorrow'} onclick={() => editDeadlineChoice = 'tomorrow'}>TOMORROW</button>
+						<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'custom'} onclick={() => editDeadlineChoice = 'custom'}>CUSTOM</button>
+						{#if editDeadlineChoice === 'custom'}
+							<input type="datetime-local" class="deadline-datetime" bind:value={editCustomDeadline} />
+						{/if}
+					</div>
+					<input type="hidden" name="deadline" value={editDeadlineValue} />
+					<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
+					<button type="submit" class="btn-save">SAVE</button>
+				</form>
+			</div>
+
+			<!-- Time summary -->
+			{#if detailPomodoros.length > 0}
+				<div class="detail-section">
+					<div class="detail-section-title">TIME</div>
+					<div class="time-summary">
+						<strong>{detailPomodoros.length} session{detailPomodoros.length !== 1 ? 's' : ''}</strong> · {formatDuration(detailPomodoros.reduce((s, l) => s + l.duration, 0))} total
+					</div>
+				</div>
+			{/if}
+
+			<!-- Resources -->
+			<div class="detail-section">
+				<div class="detail-section-title">RESOURCES</div>
+				{#if detailTodo.resources && detailTodo.resources.length > 0}
+					<div class="resource-list">
+						{#each detailTodo.resources as resource (resource.id)}
+							<div class="resource-item">
+								<span class="resource-label">{resource.label || getDomainLabel(resource.url)}</span>
+								<a class="resource-url" href={resource.url} target="_blank" rel="noopener noreferrer">{resource.url}</a>
+								<form method="POST" action="?/deleteResource" use:enhance>
+									<input type="hidden" name="id" value={detailTodo.id} />
+									<input type="hidden" name="resourceId" value={resource.id} />
+									<button type="submit" class="resource-delete">✕</button>
+								</form>
+							</div>
+						{/each}
+					</div>
+				{/if}
+				<form
+					class="detail-form"
+					method="POST"
+					action="?/addResource"
+					use:enhance={() => {
+						return async ({ update }) => {
+							await update({ reset: true });
+						};
+					}}
+				>
+					<input type="hidden" name="id" value={detailTodo.id} />
+					<div class="detail-form-row">
+						<input type="url" name="url" placeholder="https://..." required />
+					</div>
+					<div class="detail-form-row">
+						<input type="text" name="label" placeholder="Label (optional)" />
+						<button type="submit">ADD</button>
+					</div>
+				</form>
+			</div>
+
+			<!-- Activity log -->
+			<div class="detail-section">
+				<div class="detail-section-title">ACTIVITY LOG</div>
+				{#if detailTodo.logs && detailTodo.logs.length > 0}
+					<div class="log-list">
+						{#each [...detailTodo.logs].reverse() as log (log.id)}
+							<div class="log-entry">
+								<div class="log-entry-header">
+									<span class="log-time">{relativeTime(log.createdAt)}</span>
+									<form method="POST" action="?/deleteLog" use:enhance>
+										<input type="hidden" name="id" value={detailTodo.id} />
+										<input type="hidden" name="logId" value={log.id} />
+										<button type="submit" class="log-delete">✕</button>
+									</form>
+								</div>
+								<div class="log-text">{log.text}</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+				<form
+					class="detail-form"
+					method="POST"
+					action="?/addLog"
+					use:enhance={() => {
+						return async ({ update }) => {
+							await update({ reset: true });
+						};
+					}}
+				>
+					<input type="hidden" name="id" value={detailTodo.id} />
+					<textarea name="text" rows="2" placeholder="What did you work on?" required></textarea>
+					<button type="submit">ADD LOG</button>
+				</form>
+			</div>
+		</aside>
+	{/if}
 </div>
