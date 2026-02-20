@@ -1,10 +1,43 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import type { PageData } from './$types';
-	import type { TimerState, Todo } from '$lib/types';
-	import { WORK_MS, nextInterval } from '$lib/pomodoro';
+	import type { TimerState, Todo, UserSettings } from '$lib/types';
+	import { nextInterval } from '$lib/pomodoro';
+	import Calendar from '$lib/Calendar.svelte';
 
 	let { data }: { data: PageData } = $props();
+
+	// ── Sidebar state ──
+	let sidebarOpen = $state(false);
+	let sidebarPanel = $state<'settings' | 'archive' | 'calendar' | null>(null);
+	let settingsOverride = $state<UserSettings | null>(null);
+	let settings = $derived(settingsOverride ?? data.settings);
+
+	// Settings form values (in minutes)
+	let workMin = $state(0);
+	let shortBreakMin = $state(0);
+	let longBreakMin = $state(0);
+
+	$effect(() => {
+		workMin = Math.round(data.settings.workMs / 60000);
+		shortBreakMin = Math.round(data.settings.shortBreakMs / 60000);
+		longBreakMin = Math.round(data.settings.longBreakMs / 60000);
+		settingsOverride = null;
+	});
+
+	function toggleSidebar(panel: 'settings' | 'archive' | 'calendar') {
+		if (sidebarPanel === panel) {
+			sidebarPanel = null;
+		} else {
+			sidebarPanel = panel;
+		}
+		sidebarOpen = sidebarPanel !== null;
+	}
+
+	function closeSidebar() {
+		sidebarOpen = false;
+		sidebarPanel = null;
+	}
 
 	// ── Detail/deadline state ──
 	let expandedId = $state<string | null>(null);
@@ -61,7 +94,6 @@
 		const day = d.getDate();
 		const h = d.getHours();
 		const m = d.getMinutes();
-		// If it's end-of-day (23:59), just show the date
 		if (h === 23 && m === 59) return `${month} ${day}`;
 		return `${month} ${day} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 	}
@@ -106,9 +138,16 @@
 		}
 	});
 
+	// Stop timer when the active task is marked done
 	let activeTodo = $derived(
 		timer ? data.todos.find((t: { id: string }) => t.id === timer!.activeTaskId) : null
 	);
+
+	$effect(() => {
+		if (timer && activeTodo?.done) {
+			setTimer(null);
+		}
+	});
 
 	let timerLabel = $derived(
 		timer
@@ -125,18 +164,14 @@
 	// ── Timer controls ──
 
 	function activate(taskId: string) {
-		if (timer) {
-			setTimer({ ...timer, activeTaskId: taskId });
-		} else {
-			setTimer({
-				activeTaskId: taskId,
-				startedAt: Date.now(),
-				duration: WORK_MS,
-				type: 'work',
-				completedPomodoros: 0,
-				paused: false
-			});
-		}
+		setTimer({
+			activeTaskId: taskId,
+			startedAt: Date.now(),
+			duration: settings.workMs,
+			type: 'work',
+			completedPomodoros: 0,
+			paused: false
+		});
 	}
 
 	function deactivate() {
@@ -168,7 +203,7 @@
 		if (!timer) return;
 		const completed =
 			timer.type === 'work' ? timer.completedPomodoros + 1 : timer.completedPomodoros;
-		const next = nextInterval(completed);
+		const next = nextInterval(completed, settings);
 		logPomodoroToServer();
 		setTimer({
 			...timer,
@@ -186,7 +221,7 @@
 		setTimer({
 			...timer,
 			startedAt: Date.now(),
-			duration: WORK_MS,
+			duration: settings.workMs,
 			type: 'work',
 			paused: false,
 			pausedRemaining: undefined
@@ -266,170 +301,311 @@
 	<input type="hidden" name="timer" value={timerJson} />
 </form>
 
-<div class="container">
-	<header class="header">
-		<h1>TIFF</h1>
-		<span class="tagline">Todo in your focus</span>
-	</header>
+<div class="app-layout">
+	<!-- Mobile overlay -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="sidebar-overlay"
+		class:visible={sidebarOpen}
+		onclick={closeSidebar}
+		onkeydown={(e) => { if (e.key === 'Escape') closeSidebar(); }}
+	></div>
 
-	{#if timer && activeTodo}
-		<section class="hero" class:expired>
-			<div class="hero-label">{timerLabel}</div>
-			<div class="hero-task">{activeTodo.title}</div>
+	<aside class="sidebar" class:open={sidebarOpen}>
+		<div class="sidebar-header">
+			<h1>TIFF</h1>
+			<button class="sidebar-close" onclick={closeSidebar}>X</button>
+		</div>
+		<nav class="sidebar-nav">
+			<button
+				class="sidebar-tab"
+				class:active={sidebarPanel === 'settings'}
+				onclick={() => toggleSidebar('settings')}
+			>SETTINGS</button>
+			<button
+				class="sidebar-tab"
+				class:active={sidebarPanel === 'archive'}
+				onclick={() => toggleSidebar('archive')}
+			>ARCHIVE</button>
+			<button
+				class="sidebar-tab"
+				class:active={sidebarPanel === 'calendar'}
+				onclick={() => toggleSidebar('calendar')}
+			>CALENDAR</button>
+		</nav>
 
-			{#if expired}
-				<div class="expired-message">TIME'S UP</div>
-				<div class="hero-controls">
-					{#if timer.type === 'work'}
-						<button class="btn-hero btn-accent" onclick={startBreak}>START BREAK</button>
-					{:else}
-						<button class="btn-hero btn-accent" onclick={startWork}>START WORK</button>
-					{/if}
-					<button class="btn-hero" onclick={deactivate}>STOP</button>
-				</div>
-			{:else}
-				<div class="timer-display">{formatTime(remaining)}</div>
-				<div class="hero-controls">
-					{#if timer.paused}
-						<button class="btn-hero" onclick={resume}>RESUME</button>
-					{:else}
-						<button class="btn-hero" onclick={pause}>PAUSE</button>
-					{/if}
-					<button class="btn-hero" onclick={deactivate}>STOP</button>
-				</div>
-			{/if}
-
-			<div class="cycles">
-				{#each Array(4) as _, i}
-					<span class="dot" class:filled={i < cyclesFilled}></span>
-				{/each}
-			</div>
-		</section>
-	{/if}
-
-	<section class="create-section">
-		<form
-			method="POST"
-			action="?/create"
-			class="create-form"
-			use:enhance={() => {
-				return async ({ update }) => {
-					await update();
-					deadlineChoice = 'none';
-					customDeadline = '';
-				};
-			}}
-		>
-			<div class="create-top">
-				<input
-					type="text"
-					name="title"
-					placeholder="What needs to be done?"
-					autocomplete="off"
-					required
-				/>
-				<button type="submit">ADD</button>
-			</div>
-			<div class="create-extras">
-				<textarea name="detail" placeholder="Details (optional)" rows="2"></textarea>
-				<div class="deadline-row">
-					<span class="deadline-label">DEADLINE:</span>
-					<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'none'} onclick={() => deadlineChoice = 'none'}>NONE</button>
-					<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'today'} onclick={() => deadlineChoice = 'today'}>TODAY</button>
-					<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'tomorrow'} onclick={() => deadlineChoice = 'tomorrow'}>TOMORROW</button>
-					<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'custom'} onclick={() => deadlineChoice = 'custom'}>CUSTOM</button>
-					{#if deadlineChoice === 'custom'}
-						<input type="datetime-local" class="deadline-datetime" bind:value={customDeadline} />
-					{/if}
-				</div>
-				<input type="hidden" name="deadline" value={createDeadlineValue} />
-				<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
-			</div>
-		</form>
-	</section>
-
-	{#if data.todos.length > 0}
-		<ul class="todo-list">
-			{#each data.todos as todo (todo.id)}
-				<li
-					class="todo-item"
-					class:done={todo.done}
-					class:active={timer?.activeTaskId === todo.id}
+		{#if sidebarPanel === 'settings'}
+			<div class="sidebar-panel">
+				<div class="sidebar-panel-title">TIMER SETTINGS</div>
+				<form
+					method="POST"
+					action="?/saveSettings"
+					use:enhance={() => {
+						// Optimistically update local settings
+						settingsOverride = {
+							workMs: workMin * 60000,
+							shortBreakMs: shortBreakMin * 60000,
+							longBreakMs: longBreakMin * 60000
+						};
+						return async ({ update }) => {
+							await update({ reset: false });
+						};
+					}}
 				>
-					<div class="todo-row">
-						<form method="POST" action="?/toggle" class="toggle-form" use:enhance>
-							<input type="hidden" name="id" value={todo.id} />
-							<button type="submit" class="toggle-btn" class:checked={todo.done}>
-								{todo.done ? '✓' : ''}
-							</button>
-						</form>
-
-						<span class="todo-title">{todo.title}</span>
-
-						{#if todo.deadline}
-							<span class="deadline-badge" class:overdue={!todo.done && isOverdue(todo.deadline)}>
-								{formatDeadline(todo.deadline)}
-							</span>
-						{/if}
-
-						<div class="todo-actions">
-							{#if !todo.done && timer?.activeTaskId !== todo.id}
-								<button onclick={() => activate(todo.id)}>FOCUS</button>
-							{/if}
-							<button onclick={() => expandTodo(todo)}>EDIT</button>
-							<form method="POST" action="?/delete" use:enhance>
-								<input type="hidden" name="id" value={todo.id} />
-								<button
-									type="submit"
-									class="btn-danger"
-									onclick={() => {
-										if (timer?.activeTaskId === todo.id) setTimer(null);
-									}}
-								>DEL</button>
-							</form>
-						</div>
+					<div class="settings-field">
+						<label class="settings-label" for="work">Work (minutes)</label>
+						<input
+							class="settings-input"
+							type="number"
+							id="work"
+							name="work"
+							min="1"
+							max="120"
+							bind:value={workMin}
+						/>
 					</div>
+					<div class="settings-field">
+						<label class="settings-label" for="shortBreak">Short break (minutes)</label>
+						<input
+							class="settings-input"
+							type="number"
+							id="shortBreak"
+							name="shortBreak"
+							min="1"
+							max="120"
+							bind:value={shortBreakMin}
+						/>
+					</div>
+					<div class="settings-field">
+						<label class="settings-label" for="longBreak">Long break (minutes)</label>
+						<input
+							class="settings-input"
+							type="number"
+							id="longBreak"
+							name="longBreak"
+							min="1"
+							max="120"
+							bind:value={longBreakMin}
+						/>
+					</div>
+					<div class="settings-hint">Long break triggers every 4 pomodoros</div>
+					<button type="submit" class="btn-save" style="margin-top: 1rem; width: 100%;">SAVE</button>
+				</form>
+			</div>
+		{/if}
 
-					{#if expandedId === todo.id}
-						<div class="todo-detail-panel">
-							{#if todo.detail && expandedId !== todo.id}
-								<p class="detail-text">{todo.detail}</p>
-							{/if}
-							<form
-								method="POST"
-								action="?/update"
-								use:enhance={() => {
-									return async ({ update }) => {
-										await update({ reset: false });
-										expandedId = null;
-									};
-								}}
-							>
-								<input type="hidden" name="id" value={todo.id} />
-								<textarea name="detail" rows="3" placeholder="Add details...">{editDetail}</textarea>
-								<div class="deadline-row">
-									<span class="deadline-label">DEADLINE:</span>
-									<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'none'} onclick={() => editDeadlineChoice = 'none'}>NONE</button>
-									<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'today'} onclick={() => editDeadlineChoice = 'today'}>TODAY</button>
-									<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'tomorrow'} onclick={() => editDeadlineChoice = 'tomorrow'}>TOMORROW</button>
-									<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'custom'} onclick={() => editDeadlineChoice = 'custom'}>CUSTOM</button>
-									{#if editDeadlineChoice === 'custom'}
-										<input type="datetime-local" class="deadline-datetime" bind:value={editCustomDeadline} />
-									{/if}
-								</div>
-								<input type="hidden" name="deadline" value={editDeadlineValue} />
-								<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
-								<div class="detail-actions">
-									<button type="submit" class="btn-save">SAVE</button>
-									<button type="button" onclick={() => expandedId = null}>CANCEL</button>
-								</div>
-							</form>
+		{#if sidebarPanel === 'archive'}
+			<div class="sidebar-panel">
+				<div class="sidebar-panel-title">ARCHIVED TASKS</div>
+				{#if data.archivedTodos.length > 0}
+					{#each data.archivedTodos as todo (todo.id)}
+						<div class="archive-item">
+							<span class="archive-title">{todo.title}</span>
+							<div class="archive-actions">
+								<form method="POST" action="?/unarchive" use:enhance>
+									<input type="hidden" name="id" value={todo.id} />
+									<button type="submit">RESTORE</button>
+								</form>
+								<form method="POST" action="?/delete" use:enhance>
+									<input type="hidden" name="id" value={todo.id} />
+									<button type="submit" class="btn-danger">DEL</button>
+								</form>
+							</div>
 						</div>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	{:else}
-		<div class="empty">No tasks yet. Add one above.</div>
-	{/if}
+					{/each}
+				{:else}
+					<div class="archive-empty">No archived tasks</div>
+				{/if}
+			</div>
+		{/if}
+
+		{#if sidebarPanel === 'calendar'}
+			<div class="sidebar-panel">
+				<div class="sidebar-panel-title">ACTIVITY</div>
+				<Calendar pomodoroLogs={data.pomodoroLogs} todos={data.todos} />
+			</div>
+		{/if}
+	</aside>
+
+	<main class="main-content">
+		<header class="main-header">
+			<button class="menu-btn" onclick={() => { sidebarOpen = !sidebarOpen; if (!sidebarPanel) sidebarPanel = 'settings'; }}>MENU</button>
+			<span class="tagline">Todo in your focus</span>
+		</header>
+
+		{#if timer && activeTodo}
+			<section class="hero" class:expired>
+				<div class="hero-label">{timerLabel}</div>
+				<div class="hero-task">{activeTodo.title}</div>
+
+				{#if expired}
+					<div class="expired-message">TIME'S UP</div>
+					<div class="hero-controls">
+						{#if timer.type === 'work'}
+							<button class="btn-hero btn-accent" onclick={startBreak}>START BREAK</button>
+						{:else}
+							<button class="btn-hero btn-accent" onclick={startWork}>START WORK</button>
+						{/if}
+						<button class="btn-hero" onclick={deactivate}>STOP</button>
+					</div>
+				{:else}
+					<div class="timer-display">{formatTime(remaining)}</div>
+					<div class="hero-controls">
+						{#if timer.paused}
+							<button class="btn-hero" onclick={resume}>RESUME</button>
+						{:else}
+							<button class="btn-hero" onclick={pause}>PAUSE</button>
+						{/if}
+						<button class="btn-hero" onclick={deactivate}>STOP</button>
+					</div>
+				{/if}
+
+				<div class="cycles">
+					{#each Array(4) as _, i}
+						<span class="dot" class:filled={i < cyclesFilled}></span>
+					{/each}
+				</div>
+			</section>
+		{/if}
+
+		<section class="create-section" data-label="NEW TASK">
+			<form
+				method="POST"
+				action="?/create"
+				class="create-form"
+				use:enhance={() => {
+					return async ({ update }) => {
+						await update();
+						deadlineChoice = 'none';
+						customDeadline = '';
+					};
+				}}
+			>
+				<div class="create-top">
+					<input
+						type="text"
+						name="title"
+						placeholder="What needs to be done?"
+						autocomplete="off"
+						required
+					/>
+					<button type="submit">ADD</button>
+				</div>
+				<div class="create-extras">
+					<textarea name="detail" placeholder="Details (optional)" rows="2"></textarea>
+					<div class="deadline-row">
+						<span class="deadline-label">DEADLINE:</span>
+						<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'none'} onclick={() => deadlineChoice = 'none'}>NONE</button>
+						<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'today'} onclick={() => deadlineChoice = 'today'}>TODAY</button>
+						<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'tomorrow'} onclick={() => deadlineChoice = 'tomorrow'}>TOMORROW</button>
+						<button type="button" class="deadline-opt" class:selected={deadlineChoice === 'custom'} onclick={() => deadlineChoice = 'custom'}>CUSTOM</button>
+						{#if deadlineChoice === 'custom'}
+							<input type="datetime-local" class="deadline-datetime" bind:value={customDeadline} />
+						{/if}
+					</div>
+					<input type="hidden" name="deadline" value={createDeadlineValue} />
+					<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
+				</div>
+			</form>
+		</section>
+
+		<section class="task-section" data-label="TASK QUEUE">
+			{#if data.todos.length > 0}
+				<ul class="todo-list">
+					{#each data.todos as todo (todo.id)}
+						<li
+							class="todo-item"
+							class:done={todo.done}
+							class:active={timer?.activeTaskId === todo.id}
+						>
+							<div class="todo-row">
+								<form method="POST" action="?/toggle" class="toggle-form" use:enhance>
+									<input type="hidden" name="id" value={todo.id} />
+									<button type="submit" class="toggle-btn" class:checked={todo.done}>
+										{todo.done ? '✓' : ''}
+									</button>
+								</form>
+
+								{#if todo.deadline && !todo.done && isOverdue(todo.deadline)}
+									<span class="status-tag urgent">(OVERDUE)</span>
+								{:else if timer?.activeTaskId === todo.id}
+									<span class="status-tag active">[ACTIVE]</span>
+								{/if}
+
+								<span class="todo-title">{todo.title}</span>
+
+								{#if todo.deadline}
+									<span class="deadline-badge" class:overdue={!todo.done && isOverdue(todo.deadline)}>
+										{formatDeadline(todo.deadline)}
+									</span>
+								{/if}
+
+								<div class="todo-actions">
+									{#if !todo.done && timer?.activeTaskId !== todo.id}
+										<button onclick={() => activate(todo.id)}>FOCUS</button>
+									{/if}
+									{#if todo.done}
+										<form method="POST" action="?/archive" use:enhance>
+											<input type="hidden" name="id" value={todo.id} />
+											<button type="submit">ARCHIVE</button>
+										</form>
+									{/if}
+									<button onclick={() => expandTodo(todo)}>EDIT</button>
+									<form method="POST" action="?/delete" use:enhance>
+										<input type="hidden" name="id" value={todo.id} />
+										<button
+											type="submit"
+											class="btn-danger"
+											onclick={() => {
+												if (timer?.activeTaskId === todo.id) setTimer(null);
+											}}
+										>DEL</button>
+									</form>
+								</div>
+							</div>
+
+							{#if expandedId === todo.id}
+								<div class="todo-detail-panel">
+									{#if todo.detail && expandedId !== todo.id}
+										<p class="detail-text">{todo.detail}</p>
+									{/if}
+									<form
+										method="POST"
+										action="?/update"
+										use:enhance={() => {
+											return async ({ update }) => {
+												await update({ reset: false });
+												expandedId = null;
+											};
+										}}
+									>
+										<input type="hidden" name="id" value={todo.id} />
+										<textarea name="detail" rows="3" placeholder="Add details...">{editDetail}</textarea>
+										<div class="deadline-row">
+											<span class="deadline-label">DEADLINE:</span>
+											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'none'} onclick={() => editDeadlineChoice = 'none'}>NONE</button>
+											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'today'} onclick={() => editDeadlineChoice = 'today'}>TODAY</button>
+											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'tomorrow'} onclick={() => editDeadlineChoice = 'tomorrow'}>TOMORROW</button>
+											<button type="button" class="deadline-opt" class:selected={editDeadlineChoice === 'custom'} onclick={() => editDeadlineChoice = 'custom'}>CUSTOM</button>
+											{#if editDeadlineChoice === 'custom'}
+												<input type="datetime-local" class="deadline-datetime" bind:value={editCustomDeadline} />
+											{/if}
+										</div>
+										<input type="hidden" name="deadline" value={editDeadlineValue} />
+										<input type="hidden" name="timezoneOffset" value={String(timezoneOffset)} />
+										<div class="detail-actions">
+											<button type="submit" class="btn-save">SAVE</button>
+											<button type="button" onclick={() => expandedId = null}>CANCEL</button>
+										</div>
+									</form>
+								</div>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<div class="empty">No tasks yet. Add one above.</div>
+			{/if}
+		</section>
+	</main>
 </div>

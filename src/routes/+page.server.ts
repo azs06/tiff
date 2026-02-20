@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { getTodos, createTodo, toggleTodo, deleteTodo, logPomodoro, updateTodo, getTimer, saveTimer } from '$lib/kv';
-import type { TimerState } from '$lib/types';
+import { getTodos, createTodo, toggleTodo, deleteTodo, logPomodoro, updateTodo, getTimer, saveTimer, getSettings, saveSettings, archiveTodo, unarchiveTodo, getPomodoroLogs } from '$lib/kv';
+import type { TimerState, UserSettings } from '$lib/types';
 
 function resolveDeadline(value: string | undefined, timezoneOffset: number): number | undefined {
 	if (!value) return undefined;
@@ -27,11 +27,15 @@ function resolveDeadline(value: string | undefined, timezoneOffset: number): num
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	const kv = platform!.env.TIFF_KV;
-	const [todos, serverTimer] = await Promise.all([
+	const [allTodos, serverTimer, settings, pomodoroLogs] = await Promise.all([
 		getTodos(kv, locals.userEmail),
-		getTimer(kv, locals.userEmail)
+		getTimer(kv, locals.userEmail),
+		getSettings(kv, locals.userEmail),
+		getPomodoroLogs(kv, locals.userEmail)
 	]);
-	return { todos, serverTimer };
+	const todos = allTodos.filter((t) => !t.archived);
+	const archivedTodos = allTodos.filter((t) => t.archived);
+	return { todos, archivedTodos, serverTimer, settings, pomodoroLogs };
 };
 
 export const actions: Actions = {
@@ -97,5 +101,36 @@ export const actions: Actions = {
 			const parsed = JSON.parse(raw) as TimerState;
 			await saveTimer(kv, locals.userEmail, parsed);
 		}
+	},
+
+	archive: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		if (!id) return fail(400);
+		await archiveTodo(kv, locals.userEmail, id);
+	},
+
+	unarchive: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		if (!id) return fail(400);
+		await unarchiveTodo(kv, locals.userEmail, id);
+	},
+
+	saveSettings: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const clamp = (v: number) => Math.max(1, Math.min(120, v));
+		const workMin = clamp(Number(data.get('work') || 25));
+		const shortBreakMin = clamp(Number(data.get('shortBreak') || 5));
+		const longBreakMin = clamp(Number(data.get('longBreak') || 15));
+		const settings: UserSettings = {
+			workMs: workMin * 60 * 1000,
+			shortBreakMs: shortBreakMin * 60 * 1000,
+			longBreakMs: longBreakMin * 60 * 1000
+		};
+		await saveSettings(kv, locals.userEmail, settings);
 	}
 };

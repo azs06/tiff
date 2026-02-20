@@ -5,7 +5,21 @@ export interface Todo {
 	createdAt: number;
 	detail?: string;
 	deadline?: number;
+	archived?: boolean;
+	archivedAt?: number;
 }
+
+export interface UserSettings {
+	workMs: number;
+	shortBreakMs: number;
+	longBreakMs: number;
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+	workMs: 25 * 60 * 1000,
+	shortBreakMs: 5 * 60 * 1000,
+	longBreakMs: 15 * 60 * 1000
+};
 
 export interface TimerState {
 	activeTaskId: string;

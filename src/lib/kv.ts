@@ -1,4 +1,5 @@
-import type { Todo, PomodoroLog, TimerState } from './types';
+import type { Todo, PomodoroLog, TimerState, UserSettings } from './types';
+import { DEFAULT_SETTINGS } from './types';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
 	const data = await kv.get(`todos:${email}`, 'json');
@@ -90,4 +91,39 @@ export async function logPomodoro(
 	const logs = ((await kv.get(key, 'json')) as PomodoroLog[]) ?? [];
 	logs.push({ ...entry, completedAt: Date.now() });
 	await kv.put(key, JSON.stringify(logs));
+}
+
+export async function getSettings(kv: KVNamespace, email: string): Promise<UserSettings> {
+	const data = await kv.get(`settings:${email}`, 'json');
+	return (data as UserSettings) ?? { ...DEFAULT_SETTINGS };
+}
+
+export async function saveSettings(kv: KVNamespace, email: string, settings: UserSettings): Promise<void> {
+	await kv.put(`settings:${email}`, JSON.stringify(settings));
+}
+
+export async function archiveTodo(kv: KVNamespace, email: string, id: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === id);
+	if (todo) {
+		todo.archived = true;
+		todo.archivedAt = Date.now();
+		await saveTodos(kv, email, todos);
+	}
+}
+
+export async function unarchiveTodo(kv: KVNamespace, email: string, id: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === id);
+	if (todo) {
+		delete todo.archived;
+		delete todo.archivedAt;
+		todo.done = false;
+		await saveTodos(kv, email, todos);
+	}
+}
+
+export async function getPomodoroLogs(kv: KVNamespace, email: string): Promise<PomodoroLog[]> {
+	const key = `pomodoros:${email}`;
+	return ((await kv.get(key, 'json')) as PomodoroLog[]) ?? [];
 }
