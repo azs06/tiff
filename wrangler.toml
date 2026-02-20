@@ -1,5 +1,12 @@
 name = "tiff"
+main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2024-12-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
 
 [[kv_namespaces]]
 binding = "TIFF_KV"
+id = "e02956f78fa64637ad72b37805219bf1"
