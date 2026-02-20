@@ -1,0 +1,473 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap');
+
+:root {
+	--black: #000;
+	--white: #fff;
+	--red: #FF0000;
+	--border: 3px solid var(--black);
+	--border-heavy: 5px solid var(--black);
+	--font: 'JetBrains Mono', monospace;
+}
+
+*,
+*::before,
+*::after {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 16px;
+}
+
+body {
+	font-family: var(--font);
+	background: var(--white);
+	color: var(--black);
+	line-height: 1.5;
+	min-height: 100vh;
+}
+
+/* ═══ LAYOUT ═══ */
+
+.container {
+	max-width: 800px;
+	margin: 0 auto;
+	border-left: var(--border-heavy);
+	border-right: var(--border-heavy);
+	min-height: 100vh;
+}
+
+.header {
+	padding: 1rem 1.5rem;
+	border-bottom: var(--border-heavy);
+	border-top: 8px solid var(--red);
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+}
+
+.header h1 {
+	font-size: 1.5rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.25em;
+}
+
+.header .tagline {
+	font-size: 0.65rem;
+	text-transform: uppercase;
+	letter-spacing: 0.15em;
+	opacity: 0.5;
+}
+
+/* ═══ HERO: ACTIVE TASK + TIMER ═══ */
+
+.hero {
+	background: var(--black);
+	color: var(--white);
+	padding: 3rem 1.5rem 2.5rem;
+	border-bottom: var(--border-heavy);
+	text-align: center;
+}
+
+.hero.expired {
+	animation: flash 0.8s step-end infinite;
+}
+
+.hero-label {
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.3em;
+	margin-bottom: 0.75rem;
+	color: var(--red);
+}
+
+.hero-task {
+	font-size: clamp(1.1rem, 3.5vw, 1.75rem);
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: 1.5rem;
+	word-break: break-word;
+}
+
+.timer-display {
+	font-size: clamp(5rem, 20vw, 12rem);
+	font-weight: 700;
+	line-height: 1;
+	letter-spacing: 0.05em;
+	margin-bottom: 2rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.expired-message {
+	font-size: clamp(2.5rem, 10vw, 5rem);
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	margin-bottom: 2rem;
+	line-height: 1.1;
+}
+
+.hero-controls {
+	display: flex;
+	gap: 0.75rem;
+	justify-content: center;
+	flex-wrap: wrap;
+}
+
+.hero-controls form {
+	display: contents;
+}
+
+.cycles {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: center;
+	margin-top: 2rem;
+}
+
+.dot {
+	width: 14px;
+	height: 14px;
+	border: 2px solid var(--white);
+	display: inline-block;
+}
+
+.dot.filled {
+	background: var(--red);
+	border-color: var(--red);
+}
+
+/* ═══ BUTTONS ═══ */
+
+button {
+	font-family: var(--font);
+	font-size: 0.8rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	border: var(--border);
+	background: var(--white);
+	color: var(--black);
+	padding: 0.6rem 1.5rem;
+	cursor: pointer;
+	transition: none;
+}
+
+button:hover {
+	background: var(--black);
+	color: var(--white);
+}
+
+button:active {
+	background: var(--red);
+	color: var(--white);
+	border-color: var(--red);
+}
+
+.btn-danger {
+	color: var(--red);
+	border-color: var(--red);
+}
+
+.btn-danger:hover {
+	background: var(--red);
+	color: var(--white);
+}
+
+.btn-hero {
+	background: var(--white);
+	color: var(--black);
+	border: 3px solid var(--white);
+	font-size: 0.9rem;
+	padding: 0.75rem 2rem;
+}
+
+.btn-hero:hover {
+	background: var(--red);
+	color: var(--white);
+	border-color: var(--red);
+}
+
+.btn-accent {
+	background: var(--red);
+	color: var(--white);
+	border-color: var(--red);
+}
+
+.btn-accent:hover {
+	background: var(--white);
+	color: var(--red);
+}
+
+/* ═══ CREATE FORM ═══ */
+
+.create-section {
+	padding: 1.5rem;
+	border-bottom: var(--border-heavy);
+}
+
+.create-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.create-top {
+	display: flex;
+	gap: 0;
+}
+
+.create-top input[type='text'] {
+	flex: 1;
+	font-family: var(--font);
+	font-size: 1rem;
+	padding: 0.6rem 0.75rem;
+	border: var(--border);
+	border-right: none;
+	background: var(--white);
+	color: var(--black);
+	outline: none;
+}
+
+.create-top input[type='text']::placeholder {
+	color: #999;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	font-size: 0.75rem;
+}
+
+.create-top input[type='text']:focus {
+	background: var(--black);
+	color: var(--white);
+}
+
+.create-extras {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-top: 0.75rem;
+}
+
+.create-extras textarea,
+.todo-detail-panel textarea {
+	font-family: var(--font);
+	font-size: 0.85rem;
+	padding: 0.5rem 0.75rem;
+	border: var(--border);
+	background: var(--white);
+	color: var(--black);
+	outline: none;
+	resize: vertical;
+	width: 100%;
+}
+
+.create-extras textarea:focus,
+.todo-detail-panel textarea:focus {
+	background: var(--black);
+	color: var(--white);
+}
+
+.create-extras textarea::placeholder,
+.todo-detail-panel textarea::placeholder {
+	color: #999;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	font-size: 0.7rem;
+}
+
+.deadline-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+}
+
+.deadline-label {
+	font-size: 0.65rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	margin-right: 0.25rem;
+}
+
+.deadline-opt {
+	font-size: 0.6rem;
+	padding: 0.2rem 0.5rem;
+	border: 2px solid var(--black);
+}
+
+.deadline-opt.selected {
+	background: var(--black);
+	color: var(--white);
+}
+
+.deadline-datetime {
+	font-family: var(--font);
+	font-size: 0.75rem;
+	padding: 0.2rem 0.4rem;
+	border: var(--border);
+	background: var(--white);
+	color: var(--black);
+	outline: none;
+}
+
+/* ═══ TODO LIST ═══ */
+
+.todo-list {
+	list-style: none;
+}
+
+.todo-item {
+	display: block;
+	border-bottom: var(--border);
+}
+
+.todo-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.9rem 1.5rem;
+}
+
+.todo-item.active .todo-row {
+	border-left: 6px solid var(--red);
+	padding-left: calc(1.5rem - 6px);
+	background: #fafafa;
+}
+
+.todo-item.done {
+	opacity: 0.35;
+}
+
+.todo-item .toggle-form {
+	display: contents;
+}
+
+.deadline-badge {
+	font-size: 0.6rem;
+	font-weight: 700;
+	padding: 0.15rem 0.4rem;
+	border: 2px solid var(--black);
+	flex-shrink: 0;
+	white-space: nowrap;
+	letter-spacing: 0.05em;
+}
+
+.deadline-badge.overdue {
+	background: var(--red);
+	color: var(--white);
+	border-color: var(--red);
+}
+
+.todo-detail-panel {
+	padding: 0.75rem 1.5rem 1rem;
+	border-top: 1px solid #ddd;
+	background: #f5f5f5;
+}
+
+.todo-detail-panel form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.detail-text {
+	font-size: 0.8rem;
+	margin-bottom: 0.5rem;
+	white-space: pre-wrap;
+}
+
+.detail-actions {
+	display: flex;
+	gap: 0.5rem;
+}
+
+.btn-save {
+	background: var(--black);
+	color: var(--white);
+}
+
+.btn-save:hover {
+	background: var(--red);
+	border-color: var(--red);
+}
+
+.toggle-btn {
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.85rem;
+	border: var(--border);
+	flex-shrink: 0;
+	line-height: 1;
+}
+
+.toggle-btn.checked {
+	background: var(--black);
+	color: var(--white);
+}
+
+.toggle-btn.checked:hover {
+	background: var(--red);
+	border-color: var(--red);
+}
+
+.todo-title {
+	flex: 1;
+	font-size: 0.9rem;
+	word-break: break-word;
+}
+
+.todo-item.done .todo-title {
+	text-decoration: line-through;
+}
+
+.todo-actions {
+	display: flex;
+	gap: 0.4rem;
+	flex-shrink: 0;
+}
+
+.todo-actions form {
+	display: contents;
+}
+
+.todo-actions button {
+	font-size: 0.65rem;
+	padding: 0.25rem 0.6rem;
+}
+
+/* ═══ EMPTY STATE ═══ */
+
+.empty {
+	padding: 4rem 1.5rem;
+	text-align: center;
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.2em;
+	opacity: 0.4;
+}
+
+/* ═══ ANIMATIONS ═══ */
+
+@keyframes flash {
+	0%,
+	49% {
+		background: var(--red);
+		color: var(--white);
+	}
+	50%,
+	100% {
+		background: var(--black);
+		color: var(--white);
+	}
+}
