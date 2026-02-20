@@ -1,0 +1,3 @@
+# Create your KV namespace: npx wrangler kv namespace create TIFF_KV
+# Copy the ID here, then rename this file to .dev.vars
+TIFF_KV_ID=
