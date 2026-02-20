@@ -1,7 +1,8 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { getTodos, createTodo, toggleTodo, deleteTodo, logPomodoro, updateTodo, getTimer, saveTimer, getSettings, saveSettings, archiveTodo, unarchiveTodo, getPomodoroLogs } from '$lib/kv';
-import type { TimerState, UserSettings } from '$lib/types';
+import type { TimerState, UserSettings, Theme } from '$lib/types';
+import { THEMES } from '$lib/types';
 
 function resolveDeadline(value: string | undefined, timezoneOffset: number): number | undefined {
 	if (!value) return undefined;
@@ -122,15 +123,26 @@ export const actions: Actions = {
 	saveSettings: async ({ request, locals, platform }) => {
 		const kv = platform!.env.TIFF_KV;
 		const data = await request.formData();
+		const existing = await getSettings(kv, locals.userEmail);
 		const clamp = (v: number) => Math.max(1, Math.min(120, v));
 		const workMin = clamp(Number(data.get('work') || 25));
 		const shortBreakMin = clamp(Number(data.get('shortBreak') || 5));
 		const longBreakMin = clamp(Number(data.get('longBreak') || 15));
 		const settings: UserSettings = {
+			...existing,
 			workMs: workMin * 60 * 1000,
 			shortBreakMs: shortBreakMin * 60 * 1000,
 			longBreakMs: longBreakMin * 60 * 1000
 		};
 		await saveSettings(kv, locals.userEmail, settings);
+	},
+
+	saveTheme: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const theme = data.get('theme')?.toString() as Theme;
+		if (!theme || !THEMES.includes(theme)) return fail(400);
+		const existing = await getSettings(kv, locals.userEmail);
+		await saveSettings(kv, locals.userEmail, { ...existing, theme });
 	}
 };

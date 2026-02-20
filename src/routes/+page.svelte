@@ -1,11 +1,34 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { tick } from 'svelte';
 	import type { PageData } from './$types';
-	import type { TimerState, Todo, UserSettings } from '$lib/types';
+	import type { TimerState, Todo, UserSettings, Theme } from '$lib/types';
+	import { THEMES } from '$lib/types';
 	import { nextInterval } from '$lib/pomodoro';
 	import Calendar from '$lib/Calendar.svelte';
 
 	let { data }: { data: PageData } = $props();
+
+	// ── Theme state ──
+	let serverTheme = $derived(data.settings.theme);
+	let theme = $state<Theme>('signal');
+	let themeFormEl: HTMLFormElement;
+
+	// Sync from server data
+	$effect(() => {
+		theme = serverTheme;
+	});
+
+	$effect(() => {
+		localStorage.setItem('tiff-theme', theme);
+		document.documentElement.setAttribute('data-theme', theme);
+	});
+
+	async function setTheme(t: Theme) {
+		theme = t;
+		await tick();
+		themeFormEl?.requestSubmit();
+	}
 
 	// ── Sidebar state ──
 	let sidebarOpen = $state(false);
@@ -174,8 +197,25 @@
 		});
 	}
 
-	function deactivate() {
+	function closeTimer() {
 		setTimer(null);
+	}
+
+	function reset() {
+		if (!timer) return;
+		const duration =
+			timer.type === 'work'
+				? settings.workMs
+				: timer.type === 'short-break'
+					? settings.shortBreakMs
+					: settings.longBreakMs;
+		setTimer({
+			...timer,
+			startedAt: Date.now(),
+			duration,
+			paused: false,
+			pausedRemaining: undefined
+		});
 	}
 
 	function pause() {
@@ -301,6 +341,21 @@
 	<input type="hidden" name="timer" value={timerJson} />
 </form>
 
+<!-- Hidden form for persisting theme to server KV -->
+<form
+	method="POST"
+	action="?/saveTheme"
+	use:enhance={() => {
+		return async ({ update }) => {
+			await update({ reset: false, invalidateAll: false });
+		};
+	}}
+	bind:this={themeFormEl}
+	hidden
+>
+	<input type="hidden" name="theme" value={theme} />
+</form>
+
 <div class="app-layout">
 	<!-- Mobile overlay -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -334,6 +389,16 @@
 			>CALENDAR</button>
 		</nav>
 
+		<div class="theme-switcher">
+			{#each THEMES as t}
+				<button
+					class="theme-btn"
+					class:active={theme === t}
+					onclick={() => setTheme(t)}
+				>{t.toUpperCase()}</button>
+			{/each}
+		</div>
+
 		{#if sidebarPanel === 'settings'}
 			<div class="sidebar-panel">
 				<div class="sidebar-panel-title">TIMER SETTINGS</div>
@@ -345,7 +410,8 @@
 						settingsOverride = {
 							workMs: workMin * 60000,
 							shortBreakMs: shortBreakMin * 60000,
-							longBreakMs: longBreakMin * 60000
+							longBreakMs: longBreakMin * 60000,
+							theme
 						};
 						return async ({ update }) => {
 							await update({ reset: false });
@@ -435,6 +501,7 @@
 
 		{#if timer && activeTodo}
 			<section class="hero" class:expired>
+				<button class="hero-close" onclick={closeTimer} aria-label="Close timer">✕</button>
 				<div class="hero-label">{timerLabel}</div>
 				<div class="hero-task">{activeTodo.title}</div>
 
@@ -446,17 +513,17 @@
 						{:else}
 							<button class="btn-hero btn-accent" onclick={startWork}>START WORK</button>
 						{/if}
-						<button class="btn-hero" onclick={deactivate}>STOP</button>
+						<button class="btn-hero" onclick={reset}>RESET</button>
 					</div>
 				{:else}
 					<div class="timer-display">{formatTime(remaining)}</div>
 					<div class="hero-controls">
 						{#if timer.paused}
-							<button class="btn-hero" onclick={resume}>RESUME</button>
+							<button class="btn-hero btn-accent" onclick={resume}>RESUME</button>
 						{:else}
 							<button class="btn-hero" onclick={pause}>PAUSE</button>
 						{/if}
-						<button class="btn-hero" onclick={deactivate}>STOP</button>
+						<button class="btn-hero" onclick={reset}>RESET</button>
 					</div>
 				{/if}
 

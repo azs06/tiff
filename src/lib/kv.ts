@@ -95,7 +95,7 @@ export async function logPomodoro(
 
 export async function getSettings(kv: KVNamespace, email: string): Promise<UserSettings> {
 	const data = await kv.get(`settings:${email}`, 'json');
-	return (data as UserSettings) ?? { ...DEFAULT_SETTINGS };
+	return { ...DEFAULT_SETTINGS, ...(data as Partial<UserSettings>) };
 }
 
 export async function saveSettings(kv: KVNamespace, email: string, settings: UserSettings): Promise<void> {

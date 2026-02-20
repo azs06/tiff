@@ -9,16 +9,21 @@ export interface Todo {
 	archivedAt?: number;
 }
 
+export type Theme = 'signal' | 'paper' | 'void';
+export const THEMES: Theme[] = ['signal', 'paper', 'void'];
+
 export interface UserSettings {
 	workMs: number;
 	shortBreakMs: number;
 	longBreakMs: number;
+	theme: Theme;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
 	workMs: 25 * 60 * 1000,
 	shortBreakMs: 5 * 60 * 1000,
-	longBreakMs: 15 * 60 * 1000
+	longBreakMs: 15 * 60 * 1000,
+	theme: 'signal'
 };
 
 export interface TimerState {
