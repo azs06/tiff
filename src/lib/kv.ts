@@ -1,4 +1,4 @@
-import type { Todo, PomodoroLog, TimerState, UserSettings } from './types';
+import type { Todo, PomodoroLog, TimerState, UserSettings, TaskLog, Resource } from './types';
 import { DEFAULT_SETTINGS } from './types';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
@@ -126,4 +126,39 @@ export async function unarchiveTodo(kv: KVNamespace, email: string, id: string):
 export async function getPomodoroLogs(kv: KVNamespace, email: string): Promise<PomodoroLog[]> {
 	const key = `pomodoros:${email}`;
 	return ((await kv.get(key, 'json')) as PomodoroLog[]) ?? [];
+}
+
+export async function addTaskLog(kv: KVNamespace, email: string, todoId: string, text: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === todoId);
+	if (!todo) return;
+	const log: TaskLog = { id: crypto.randomUUID(), text, createdAt: Date.now() };
+	todo.logs = [...(todo.logs ?? []), log];
+	await saveTodos(kv, email, todos);
+}
+
+export async function deleteTaskLog(kv: KVNamespace, email: string, todoId: string, logId: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === todoId);
+	if (!todo || !todo.logs) return;
+	todo.logs = todo.logs.filter((l) => l.id !== logId);
+	await saveTodos(kv, email, todos);
+}
+
+export async function addResource(kv: KVNamespace, email: string, todoId: string, url: string, label?: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === todoId);
+	if (!todo) return;
+	const resource: Resource = { id: crypto.randomUUID(), url, createdAt: Date.now() };
+	if (label) resource.label = label;
+	todo.resources = [...(todo.resources ?? []), resource];
+	await saveTodos(kv, email, todos);
+}
+
+export async function deleteResource(kv: KVNamespace, email: string, todoId: string, resourceId: string): Promise<void> {
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === todoId);
+	if (!todo || !todo.resources) return;
+	todo.resources = todo.resources.filter((r) => r.id !== resourceId);
+	await saveTodos(kv, email, todos);
 }

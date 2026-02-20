@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { getTodos, createTodo, toggleTodo, deleteTodo, logPomodoro, updateTodo, getTimer, saveTimer, getSettings, saveSettings, archiveTodo, unarchiveTodo, getPomodoroLogs } from '$lib/kv';
+import { getTodos, createTodo, toggleTodo, deleteTodo, logPomodoro, updateTodo, getTimer, saveTimer, getSettings, saveSettings, archiveTodo, unarchiveTodo, getPomodoroLogs, addTaskLog, deleteTaskLog, addResource, deleteResource } from '$lib/kv';
 import type { TimerState, UserSettings, Theme } from '$lib/types';
 import { THEMES } from '$lib/types';
 
@@ -144,5 +144,42 @@ export const actions: Actions = {
 		if (!theme || !THEMES.includes(theme)) return fail(400);
 		const existing = await getSettings(kv, locals.userEmail);
 		await saveSettings(kv, locals.userEmail, { ...existing, theme });
+	},
+
+	addLog: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		const text = data.get('text')?.toString().trim();
+		if (!id || !text) return fail(400);
+		await addTaskLog(kv, locals.userEmail, id, text);
+	},
+
+	deleteLog: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		const logId = data.get('logId')?.toString();
+		if (!id || !logId) return fail(400);
+		await deleteTaskLog(kv, locals.userEmail, id, logId);
+	},
+
+	addResource: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		const url = data.get('url')?.toString().trim();
+		if (!id || !url) return fail(400);
+		const label = data.get('label')?.toString().trim() || undefined;
+		await addResource(kv, locals.userEmail, id, url, label);
+	},
+
+	deleteResource: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		const resourceId = data.get('resourceId')?.toString();
+		if (!id || !resourceId) return fail(400);
+		await deleteResource(kv, locals.userEmail, id, resourceId);
 	}
 };

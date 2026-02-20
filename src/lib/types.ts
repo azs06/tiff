@@ -1,3 +1,16 @@
+export interface TaskLog {
+	id: string;
+	text: string;
+	createdAt: number;
+}
+
+export interface Resource {
+	id: string;
+	url: string;
+	label?: string;
+	createdAt: number;
+}
+
 export interface Todo {
 	id: string;
 	title: string;
@@ -7,6 +20,8 @@ export interface Todo {
 	deadline?: number;
 	archived?: boolean;
 	archivedAt?: number;
+	logs?: TaskLog[];
+	resources?: Resource[];
 }
 
 export type Theme = 'signal' | 'paper' | 'void';
