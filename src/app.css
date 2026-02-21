@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&family=Azeret+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
 	--bg-deep:      #F4F4EF;
@@ -45,24 +46,24 @@
 	--hero-text:    #F7F3ED;
 }
 
-/* ═══ THEME: VOID ═══ */
+/* ═══ THEME: NOTHING ═══ */
 
-[data-theme="void"] {
-	--bg-deep:      #0A0A0F;
-	--bg-panel:     #111118;
-	--bg-surface:   #16161F;
-	--bg-elevated:  #1E1E28;
-	--text-primary: #E0E0E8;
-	--text-muted:   #6E6E82;
-	--text-dim:     #3A3A4A;
-	--accent:       #00E5FF;
-	--accent-dark:  #00B4CC;
-	--danger:       #FF3355;
-	--border-color: #2A2A36;
-	--font:         'Outfit', sans-serif;
-	--font-display: 'Azeret Mono', monospace;
-	--hero-bg:      #06060A;
-	--hero-text:    #E0E0E8;
+[data-theme="nothing"] {
+	--bg-deep:      #FFFFFF;
+	--bg-panel:     #FFFFFF;
+	--bg-surface:   #F5F5F5;
+	--bg-elevated:  #EBEBEB;
+	--text-primary: #1A1A1A;
+	--text-muted:   #888888;
+	--text-dim:     #C0C0C0;
+	--accent:       #1A1A1A;
+	--accent-dark:  #000000;
+	--danger:       #EB5757;
+	--border-color: #E0E0E0;
+	--font:         'Inter', sans-serif;
+	--font-display: 'Inter', sans-serif;
+	--hero-bg:      #FFFFFF;
+	--hero-text:    #1A1A1A;
 }
 
 *,
@@ -143,8 +144,23 @@ body::after {
 	z-index: 1;
 }
 
+.app-layout.sidebar-collapsed {
+	grid-template-columns: 0fr 1fr;
+}
+
+.app-layout.sidebar-collapsed .sidebar {
+	overflow: hidden;
+	border-right: none;
+	width: 0;
+	min-width: 0;
+}
+
 .app-layout.detail-open {
 	grid-template-columns: var(--sidebar-w) 1fr var(--detail-w);
+}
+
+.app-layout.sidebar-collapsed.detail-open {
+	grid-template-columns: 0fr 1fr var(--detail-w);
 }
 
 /* ═══ SIDEBAR ═══ */
@@ -780,11 +796,46 @@ body::after {
 	padding: 0.4rem 0.8rem;
 }
 
+.toggle-sidebar-btn {
+	font-size: 0.75rem;
+	padding: 0.3rem 0.5rem;
+	background: transparent;
+	border: 1px solid var(--border-color);
+	color: var(--text-muted);
+	cursor: pointer;
+	line-height: 1;
+}
+
+.toggle-sidebar-btn:hover {
+	background: var(--bg-elevated);
+	color: var(--text-primary);
+}
+
 .main-header .tagline {
 	font-size: 0.65rem;
 	text-transform: uppercase;
 	letter-spacing: 0.2em;
 	color: var(--text-muted);
+	flex: 1;
+}
+
+.toggle-detail-btn {
+	font-family: var(--font);
+	font-size: 0.6rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	padding: 0.35rem 0.7rem;
+	background: transparent;
+	border: 1px solid var(--border-color);
+	color: var(--text-muted);
+	cursor: pointer;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.toggle-detail-btn:hover {
+	background: var(--bg-elevated);
+	color: var(--text-primary);
 }
 
 /* ═══ SECTION LABELS (data-label) ═══ */
@@ -805,44 +856,17 @@ body::after {
 	font-variant: small-caps;
 }
 
-/* ═══ HERO: ACTIVE TASK + TIMER ═══ */
+/* ═══ HERO: FOCUSED TASK CARD ═══ */
 
-.hero {
+.hero-focus {
 	background: var(--hero-bg);
 	color: var(--hero-text);
-	padding: 3rem 2rem 2.75rem;
+	padding: 1.5rem 2rem 1.25rem;
 	border-bottom: 1px solid var(--border-color);
-	text-align: center;
 	position: relative;
 }
 
-.hero-close {
-	position: absolute;
-	top: 1rem;
-	right: 1.25rem;
-	background: none;
-	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
-	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
-	width: 30px;
-	height: 30px;
-	font-size: 0.85rem;
-	cursor: pointer;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 0;
-	transition: all 0.15s ease;
-	z-index: 2;
-}
-
-.hero-close:hover {
-	color: var(--hero-text);
-	border-color: var(--hero-text);
-	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
-}
-
-/* Neon glow top bar */
-.hero::before {
+.hero-focus::before {
 	content: '';
 	position: absolute;
 	top: 0;
@@ -855,81 +879,356 @@ body::after {
 		0 0 40px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-.hero.expired {
-	animation: flash 0.8s step-end infinite;
-}
-
-.hero-label {
-	font-size: 0.7rem;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.35em;
-	margin-bottom: 0.75rem;
-	color: var(--accent);
-}
-
-.hero-task {
-	font-size: clamp(1rem, 3vw, 1.5rem);
-	font-weight: 800;
-	text-transform: uppercase;
-	letter-spacing: 0.06em;
-	margin-bottom: 1.5rem;
-	word-break: break-word;
-}
-
-.timer-display {
-	font-family: var(--font-display);
-	font-size: clamp(4.5rem, 15vw, 9rem);
-	font-weight: 700;
-	line-height: 1;
-	letter-spacing: 0.05em;
-	margin-bottom: 2rem;
-	font-variant-numeric: tabular-nums;
-	color: var(--accent);
-	text-shadow:
-		0 0 20px color-mix(in srgb, var(--accent) 50%, transparent),
-		0 0 60px color-mix(in srgb, var(--accent) 20%, transparent);
-	animation: neon-pulse 2s ease-in-out infinite;
-}
-
-.expired-message {
-	font-size: clamp(2rem, 8vw, 4rem);
-	font-weight: 800;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	margin-bottom: 2rem;
-	line-height: 1.1;
-}
-
-.hero-controls {
+.focus-top-bar {
 	display: flex;
-	gap: 1rem;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 0.75rem;
+}
+
+.focus-project {
+	font-size: 0.6rem;
+	font-weight: 700;
+	letter-spacing: 0.2em;
+	color: var(--accent);
+}
+
+.hero-toggle-btn {
+	padding: 0.3rem 0.7rem;
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
+	cursor: pointer;
+	transition: all 0.15s ease;
+	margin-left: auto;
+}
+
+.hero-toggle-btn::before {
+	content: '';
+	width: 14px;
+	height: 14px;
+	min-width: 14px;
+	border: 2px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
+	display: block;
+	transition: all 0.15s ease;
+}
+
+.hero-toggle-label {
+	font-size: 0.6rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+}
+
+.hero-toggle-btn:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.hero-toggle-btn:hover::before {
+	border-color: var(--accent);
+	background: var(--accent);
+	box-shadow: inset 0 0 0 1px var(--hero-bg);
+}
+
+.hero-close {
+	background: none;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
+	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
+	font-size: 0.6rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	padding: 0.3rem 0.7rem;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.hero-close:hover {
+	color: var(--hero-text);
+	border-color: var(--hero-text);
+	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
+}
+
+.focus-nav-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-bottom: 0.5rem;
+}
+
+.focus-nav-btn {
+	flex-shrink: 0;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	font-size: 1rem;
+	display: flex;
+	align-items: center;
 	justify-content: center;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 60%, transparent);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.focus-nav-btn:hover {
+	color: var(--hero-text);
+	border-color: var(--hero-text);
+	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
+}
+
+.focus-title {
+	flex: 1;
+	font-size: clamp(1.2rem, 3vw, 1.8rem);
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	word-break: break-word;
+	line-height: 1.2;
+}
+
+.focus-detail {
+	font-size: 0.8rem;
+	color: color-mix(in srgb, var(--hero-text) 70%, transparent);
+	margin-bottom: 0.75rem;
+	white-space: pre-wrap;
+	line-height: 1.5;
+	max-height: 4.5em;
+	overflow: hidden;
+}
+
+.focus-last-log {
+	padding: 0.6rem 0.75rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 15%, transparent);
+	margin-bottom: 0.75rem;
+	font-size: 0.75rem;
+}
+
+.focus-log-label {
+	font-size: 0.55rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
+	margin-right: 0.5rem;
+}
+
+.focus-log-time {
+	font-size: 0.6rem;
+	color: color-mix(in srgb, var(--hero-text) 40%, transparent);
+}
+
+.focus-log-text {
+	margin-top: 0.25rem;
+	color: color-mix(in srgb, var(--hero-text) 80%, transparent);
+	line-height: 1.4;
+}
+
+/* Markdown inside logs */
+.focus-log-text code,
+.log-text code {
+	background: color-mix(in srgb, currentColor 12%, transparent);
+	padding: 0.1em 0.35em;
+	border-radius: 3px;
+	font-size: 0.85em;
+}
+
+.focus-log-text a,
+.log-text a {
+	color: var(--accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.focus-log-text ul,
+.log-text ul {
+	margin: 0.25rem 0;
+	padding-left: 1.2em;
+	list-style: disc;
+}
+
+.focus-log-text li,
+.log-text li {
+	margin: 0.1rem 0;
+}
+
+.focus-bottom {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.75rem;
 	flex-wrap: wrap;
 }
 
-.hero-controls form {
-	display: contents;
-}
-
-.cycles {
+.focus-session {
 	display: flex;
-	gap: 0.6rem;
-	justify-content: center;
-	margin-top: 1.75rem;
+	align-items: baseline;
+	gap: 0.5rem;
 }
 
-.dot {
-	width: 16px;
-	height: 16px;
-	border: 2px solid #555;
+.focus-session-label {
+	font-size: 0.55rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
+}
+
+.focus-elapsed {
+	font-family: var(--font-display);
+	font-size: 1.4rem;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	color: var(--accent);
+}
+
+/* ── Compact pomodoro pill ── */
+
+.focus-pomodoro {
+	display: flex;
+	align-items: center;
+}
+
+.pomo-start-btn {
+	font-size: 0.6rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	padding: 0.35rem 0.8rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 60%, transparent);
+	cursor: pointer;
+}
+
+.pomo-start-btn:hover {
+	color: var(--hero-text);
+	border-color: var(--hero-text);
+	background: color-mix(in srgb, var(--hero-text) 8%, transparent);
+}
+
+.pomo-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.35rem 0.8rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
+	font-size: 0.7rem;
+}
+
+.pomo-pill.expired {
+	border-color: var(--danger);
+}
+
+.pomo-time {
+	font-variant-numeric: tabular-nums;
+	font-weight: 700;
+	color: var(--accent);
+}
+
+.pomo-label {
+	font-weight: 700;
+	color: var(--danger);
+	font-size: 0.6rem;
+	letter-spacing: 0.1em;
+}
+
+.pomo-type {
+	font-size: 0.55rem;
+	letter-spacing: 0.1em;
+	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
+	font-weight: 700;
+}
+
+.pomo-action {
+	font-size: 0.55rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	padding: 0.15rem 0.5rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
+	background: transparent;
+	color: var(--hero-text);
+	cursor: pointer;
+}
+
+.pomo-action:hover {
+	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
+}
+
+.pomo-stop {
+	color: var(--danger);
+	border-color: var(--danger);
+}
+
+.pomo-dots {
+	display: flex;
+	gap: 0.25rem;
+	align-items: center;
+}
+
+.pomo-dot {
+	width: 8px;
+	height: 8px;
+	border: 1.5px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
 	display: inline-block;
 }
 
-.dot.filled {
+.pomo-dot.filled {
 	background: var(--accent);
 	border-color: var(--accent);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* ── Quick log form in hero ── */
+
+.focus-log-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+
+.focus-log-form textarea {
+	width: 100%;
+	font-family: var(--font);
+	font-size: 0.8rem;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+	background: color-mix(in srgb, var(--hero-text) 5%, transparent);
+	color: var(--hero-text);
+	outline: none;
+	resize: vertical;
+	min-height: 3.5rem;
+	line-height: 1.5;
+}
+
+.focus-log-form textarea::placeholder {
+	color: color-mix(in srgb, var(--hero-text) 35%, transparent);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-size: 0.65rem;
+}
+
+.focus-log-form textarea:focus {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--hero-text) 8%, transparent);
+}
+
+.focus-log-form button {
+	align-self: flex-end;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+	padding: 0.4rem 1.2rem;
+	font-size: 0.65rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	background: transparent;
+	color: var(--hero-text);
+	cursor: pointer;
+}
+
+.focus-log-form button:hover {
+	background: var(--accent);
+	color: #111;
+	border-color: var(--accent);
 }
 
 /* ═══ BUTTONS ═══ */
@@ -968,21 +1267,6 @@ button:active:not(.todo-title) {
 .btn-danger:hover {
 	background: var(--danger);
 	color: #fff;
-}
-
-.btn-hero {
-	background: transparent;
-	color: var(--hero-text);
-	border: 2px solid var(--hero-text);
-	font-size: 0.8rem;
-	padding: 0.65rem 2rem;
-}
-
-.btn-hero:hover {
-	background: var(--accent);
-	color: #111;
-	border-color: var(--accent);
-	box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .btn-accent {
@@ -1129,6 +1413,153 @@ button:active:not(.todo-title) {
 	background: var(--bg-surface);
 	color: var(--text-primary);
 	outline: none;
+}
+
+/* ═══ PROJECT ROW (in create form) ═══ */
+
+.project-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.project-label {
+	font-size: 0.65rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--text-muted);
+}
+
+.project-select {
+	font-family: var(--font);
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	padding: 0.3rem 0.6rem;
+	border: 1px solid var(--border-color);
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	outline: none;
+	cursor: pointer;
+}
+
+/* ═══ TASK GROUPS ═══ */
+
+.task-group-header {
+	font-size: 0.55rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.25em;
+	color: var(--text-muted);
+	padding: 1rem var(--content-pad) 0.4rem;
+	border-bottom: 1px solid var(--border-color);
+	background: var(--bg-surface);
+}
+
+/* ═══ PROJECT SIDEBAR ═══ */
+
+.project-create-form {
+	display: flex;
+	gap: 0;
+	margin-bottom: 0.75rem;
+}
+
+.project-create-form input {
+	flex: 1;
+	font-family: var(--font);
+	font-size: 0.75rem;
+	padding: 0.5rem 0.65rem;
+	border: 1px solid var(--border-color);
+	border-right: none;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	outline: none;
+}
+
+.project-create-form input::placeholder {
+	color: var(--text-dim);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-size: 0.65rem;
+}
+
+.project-create-form button {
+	padding: 0.5rem 0.8rem;
+	font-size: 0.65rem;
+	border: 1px solid var(--border-color);
+}
+
+.project-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+}
+
+.project-name {
+	flex: 1;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	color: var(--text-primary);
+}
+
+.project-count {
+	font-size: 0.6rem;
+	color: var(--text-dim);
+	font-weight: 700;
+}
+
+.project-item .btn-danger {
+	padding: 0.2rem 0.5rem;
+	font-size: 0.55rem;
+}
+
+/* ═══ SESSION STYLES ═══ */
+
+.session-summary {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	margin-bottom: 0.5rem;
+}
+
+.session-summary strong {
+	color: var(--text-primary);
+}
+
+.session-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.session-entry {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.35rem 0;
+	font-size: 0.7rem;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
+}
+
+.session-date {
+	color: var(--text-dim);
+	min-width: 5rem;
+}
+
+.session-duration {
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.session-reason {
+	color: var(--text-dim);
+	font-size: 0.6rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
 }
 
 /* ═══ TODO LIST ═══ */
@@ -1524,7 +1955,7 @@ button:active:not(.todo-title) {
 }
 
 /* Cycle dots as circles */
-[data-theme="paper"] .dot {
+[data-theme="paper"] .pomo-dot {
 	border-radius: 50%;
 	border-color: var(--border-color);
 }
@@ -1554,18 +1985,18 @@ button:active:not(.todo-title) {
 	letter-spacing: 0.1em;
 }
 
-/* Hero — warm gradient, decorative borders */
-[data-theme="paper"] .hero {
+/* Hero focus — warm gradient, decorative borders */
+[data-theme="paper"] .hero-focus {
 	background: linear-gradient(175deg, #2C2014 0%, #3D2B1C 50%, #2C2014 100%);
 }
 
-[data-theme="paper"] .hero::before {
+[data-theme="paper"] .hero-focus::before {
 	height: 4px;
 	background: var(--accent);
 	box-shadow: none;
 }
 
-[data-theme="paper"] .hero::after {
+[data-theme="paper"] .hero-focus::after {
 	content: '';
 	position: absolute;
 	bottom: 0;
@@ -1576,37 +2007,60 @@ button:active:not(.todo-title) {
 	pointer-events: none;
 }
 
-/* Hero typography — serif task title */
-[data-theme="paper"] .hero-task {
-	font-family: var(--font-display);
-	text-transform: none;
-	letter-spacing: 0.02em;
-	font-weight: 900;
-	font-size: clamp(1.4rem, 4vw, 2.2rem);
-}
-
-/* Hero label — serif italic */
-[data-theme="paper"] .hero-label {
-	font-family: var(--font-display);
-	font-style: italic;
-	font-weight: 700;
-	letter-spacing: 0.2em;
-}
-
-/* Timer — clean, elegant, no glow/animation */
-[data-theme="paper"] .timer-display {
-	animation: none;
-	text-shadow: none;
-}
-
-/* Hero buttons — rounded, editorial */
-[data-theme="paper"] .btn-hero {
+/* Focus nav arrows — rounded */
+[data-theme="paper"] .focus-nav-btn {
 	border-radius: 6px;
 	transition: all 0.2s ease;
 }
 
-[data-theme="paper"] .btn-hero:hover {
+/* Focus title — serif */
+[data-theme="paper"] .focus-title {
+	font-family: var(--font-display);
+	text-transform: none;
+	letter-spacing: 0.02em;
+	font-weight: 900;
+}
+
+/* Focus project label — serif italic */
+[data-theme="paper"] .focus-project {
+	font-family: var(--font-display);
+	font-style: italic;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+}
+
+/* Pomodoro pill — rounded */
+[data-theme="paper"] .pomo-pill,
+[data-theme="paper"] .pomo-action,
+[data-theme="paper"] .pomo-start-btn {
+	border-radius: 4px;
+	transition: all 0.2s ease;
+}
+
+[data-theme="paper"] .pomo-action:hover,
+[data-theme="paper"] .pomo-start-btn:hover {
 	box-shadow: none;
+}
+
+/* Focus log form — rounded */
+[data-theme="paper"] .focus-log-form textarea {
+	border-radius: 4px;
+}
+
+[data-theme="paper"] .focus-log-form button {
+	border-radius: 4px;
+}
+
+/* Project/session — rounded */
+[data-theme="paper"] .project-select {
+	border-radius: 4px;
+}
+
+[data-theme="paper"] .task-group-header {
+	font-family: var(--font-display);
+	font-style: italic;
+	font-weight: 900;
+	letter-spacing: 0.08em;
 }
 
 /* Section labels — serif italic with decorative style */
@@ -1627,6 +2081,12 @@ button:active:not(.todo-title) {
 	letter-spacing: 0.12em;
 }
 
+/* Toggle buttons — rounded */
+[data-theme="paper"] .toggle-sidebar-btn,
+[data-theme="paper"] .toggle-detail-btn {
+	border-radius: 4px;
+}
+
 /* Active tab — softer treatment */
 [data-theme="paper"] .sidebar-tab {
 	transition: all 0.2s ease;
@@ -1644,203 +2104,324 @@ button:active:not(.todo-title) {
 	letter-spacing: 0.08em;
 }
 
-/* ═══ VOID THEME OVERRIDES ═══ */
+/* ═══ NOTHING THEME OVERRIDES ═══ */
 
-/* Texture: subtle dark grain */
-[data-theme="void"] body::before {
-	opacity: 0.03;
+/* No texture */
+[data-theme="nothing"] body::before {
+	opacity: 0;
 }
 
 /* No scanlines */
-[data-theme="void"] body::after {
+[data-theme="nothing"] body::after {
 	background: none;
 }
 
-/* Deeper vignette */
-[data-theme="void"] .main-content::after {
-	background: radial-gradient(
-		ellipse at center,
-		transparent 30%,
-		rgba(0, 0, 0, 0.35) 100%
-	);
+/* No vignette */
+[data-theme="nothing"] .main-content::after {
+	background: none;
 }
 
-/* Sidebar — atmospheric gradient */
-[data-theme="void"] .sidebar {
-	background: linear-gradient(180deg, #0E0E16 0%, var(--bg-panel) 100%);
-	border-right-color: #1E1E2A;
+/* Sidebar — clean white, subtle border */
+[data-theme="nothing"] .sidebar {
+	background: var(--bg-panel);
+	border-right: 1px solid var(--border-color);
 }
 
-/* Header — stronger cyan glow */
-[data-theme="void"] .sidebar-header {
-	box-shadow:
-		0 -8px 30px -4px color-mix(in srgb, var(--accent) 40%, transparent),
-		inset 0 1px 0 0 color-mix(in srgb, var(--accent) 15%, transparent);
+/* Header — no glow, subtle bottom border */
+[data-theme="nothing"] .sidebar-header {
+	box-shadow: none;
+	border-bottom: 1px solid var(--border-color);
 }
 
-/* Logo — subtle text glow, no glitch */
-[data-theme="void"] .sidebar-header h1 {
-	text-shadow: 0 0 25px color-mix(in srgb, var(--accent) 20%, transparent);
+/* Logo — clean, no effects */
+[data-theme="nothing"] .sidebar-header h1 {
+	text-shadow: none;
+	font-weight: 700;
+	letter-spacing: 0.04em;
 }
 
-[data-theme="void"] .sidebar-header h1:hover {
+[data-theme="nothing"] .sidebar-header h1:hover {
 	animation: none;
 	color: var(--accent);
-	text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 40%, transparent);
+	text-shadow: none;
 }
 
-/* Buttons — glow transitions */
-[data-theme="void"] button {
+/* Buttons — soft rounded, gentle transitions */
+[data-theme="nothing"] button {
+	border-radius: 6px;
 	transition: all 0.15s ease;
 }
 
-[data-theme="void"] button:hover {
-	box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent);
+[data-theme="nothing"] button:hover:not(.todo-title) {
+	box-shadow: none;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-color: var(--border-color);
 }
 
-[data-theme="void"] button:active {
-	box-shadow: 0 0 20px color-mix(in srgb, var(--danger) 40%, transparent);
-}
-
-/* Hero — gradient depth, mega neon bar */
-[data-theme="void"] .hero {
-	background: linear-gradient(180deg, #04040A 0%, #0C0C18 50%, #04040A 100%);
-}
-
-[data-theme="void"] .hero::before {
-	box-shadow:
-		0 0 20px var(--accent),
-		0 0 60px color-mix(in srgb, var(--accent) 60%, transparent),
-		0 0 100px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-/* Hero label — glow */
-[data-theme="void"] .hero-label {
-	text-shadow: 0 0 20px color-mix(in srgb, var(--accent) 50%, transparent);
-}
-
-/* Timer — triple-layer glow */
-[data-theme="void"] .timer-display {
-	text-shadow:
-		0 0 30px color-mix(in srgb, var(--accent) 65%, transparent),
-		0 0 80px color-mix(in srgb, var(--accent) 35%, transparent),
-		0 0 140px color-mix(in srgb, var(--accent) 15%, transparent);
-}
-
-/* Hero buttons — glow border on hover */
-[data-theme="void"] .btn-hero {
-	border-color: color-mix(in srgb, var(--hero-text) 35%, transparent);
-	transition: all 0.15s ease;
-}
-
-[data-theme="void"] .btn-hero:hover {
-	box-shadow:
-		0 0 20px color-mix(in srgb, var(--accent) 40%, transparent),
-		inset 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-/* Toggle — glow */
-[data-theme="void"] .toggle-btn {
-	transition: all 0.15s ease;
-}
-
-[data-theme="void"] .toggle-btn:hover {
-	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent),
-		inset 0 0 0 1px var(--accent);
-}
-
-[data-theme="void"] .toggle-btn.checked {
-	box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-/* Form inputs — cyan glow on focus */
-[data-theme="void"] .create-top input[type='text']:focus,
-[data-theme="void"] .create-extras textarea:focus,
-[data-theme="void"] .todo-detail-panel textarea:focus,
-[data-theme="void"] .settings-input:focus {
-	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent),
-		inset 0 0 0 1px var(--accent);
+[data-theme="nothing"] button:active:not(.todo-title) {
+	box-shadow: none;
 	background: var(--bg-elevated);
+	color: var(--text-primary);
+	border-color: var(--border-color);
 }
 
-/* Todo hover — subtle cyan tint */
-[data-theme="void"] .todo-item:hover {
-	background: color-mix(in srgb, var(--accent) 3%, var(--bg-panel));
+/* Accent-bg elements — white text on dark accent */
+[data-theme="nothing"] .btn-accent {
+	color: #FFFFFF;
+	box-shadow: none;
 }
 
-/* Active todo — glow left edge */
-[data-theme="void"] .todo-item.active .todo-row {
-	box-shadow: inset 6px 0 16px -6px color-mix(in srgb, var(--accent) 30%, transparent);
+[data-theme="nothing"] .btn-accent:hover {
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	box-shadow: none;
+	border-color: var(--border-color);
 }
 
-/* Section labels — text glow */
-[data-theme="void"] [data-label]::before {
-	text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .btn-save {
+	color: #FFFFFF;
 }
 
-/* Tagline — subtle glow */
-[data-theme="void"] .main-header .tagline {
-	text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 15%, transparent);
+[data-theme="nothing"] .deadline-opt.selected {
+	color: #FFFFFF;
 }
 
-/* Cycle dots — glow on filled */
-[data-theme="void"] .dot {
-	border-color: #3A3A4A;
+[data-theme="nothing"] .detail-badge.done {
+	color: #FFFFFF;
 }
 
-[data-theme="void"] .dot.filled {
-	box-shadow:
-		0 0 10px color-mix(in srgb, var(--accent) 55%, transparent),
-		0 0 25px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .toggle-btn.checked {
+	background: var(--accent);
+	color: #FFFFFF;
 }
 
-/* Theme button — strong glow when active */
-[data-theme="void"] .theme-btn.active {
-	box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent);
+/* Hero focus — light, spacious, no gradient */
+[data-theme="nothing"] .hero-focus {
+	background: var(--bg-panel);
+	border-bottom: 1px solid var(--border-color);
 }
 
-/* Sidebar active tab — glow */
-[data-theme="void"] .sidebar-tab.active {
-	box-shadow: inset 4px 0 12px -4px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .hero-focus::before {
+	box-shadow: none;
+	background: var(--accent);
+	opacity: 0.6;
+	height: 2px;
 }
 
-/* Deadline badge */
-[data-theme="void"] .deadline-badge {
-	border-color: #3A3A4A;
+/* Focus project label — muted */
+[data-theme="nothing"] .focus-project {
+	color: var(--text-muted);
 }
 
-/* Panel title — glow */
-[data-theme="void"] .sidebar-panel-title {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 15%, transparent);
+/* Focus elapsed — dark text instead of accent */
+[data-theme="nothing"] .focus-elapsed {
+	color: var(--text-primary);
 }
 
-/* Detail panel — dark gradient */
-[data-theme="void"] .detail-panel {
-	background: linear-gradient(180deg, #0E0E16 0%, var(--bg-panel) 100%);
-	border-left-color: #1E1E2A;
+/* Pomo pill — clean */
+[data-theme="nothing"] .pomo-pill,
+[data-theme="nothing"] .pomo-action,
+[data-theme="nothing"] .pomo-start-btn,
+[data-theme="nothing"] .pomo-dot {
+	border-radius: 4px;
 }
 
-[data-theme="void"] .detail-form input:focus,
-[data-theme="void"] .detail-form textarea:focus {
+[data-theme="nothing"] .pomo-time {
+	color: var(--text-primary);
+}
+
+[data-theme="nothing"] .pomo-dot.filled {
+	background: var(--accent);
 	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent),
-		inset 0 0 0 1px var(--accent);
-	background: var(--bg-elevated);
 }
 
-[data-theme="void"] .detail-section-title {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 15%, transparent);
+/* Focus log form — rounded, clean */
+[data-theme="nothing"] .focus-log-form textarea {
+	border-radius: 6px;
+	background: var(--bg-surface);
+	border-color: var(--border-color);
+	color: var(--text-primary);
 }
 
-[data-theme="void"] .resource-url:hover {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .focus-log-form textarea::placeholder {
+	color: var(--text-dim);
 }
 
-/* Calendar today — stronger glow */
-[data-theme="void"] .cal-cell.today {
-	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
+[data-theme="nothing"] .focus-log-form textarea:focus {
+	border-color: var(--accent);
+	background: var(--bg-panel);
+}
+
+[data-theme="nothing"] .focus-log-form button {
+	border-radius: 6px;
+	border-color: var(--border-color);
+	color: var(--text-primary);
+}
+
+[data-theme="nothing"] .focus-log-form button:hover {
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-color: var(--border-color);
+}
+
+/* Focus nav arrows — rounded */
+[data-theme="nothing"] .focus-nav-btn {
+	border-radius: 6px;
+	border-color: var(--border-color);
+	color: var(--text-muted);
+}
+
+[data-theme="nothing"] .focus-nav-btn:hover {
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-color: var(--border-color);
+}
+
+/* Focus last log — soft */
+[data-theme="nothing"] .focus-last-log {
+	border-color: var(--border-color);
+	border-radius: 6px;
+}
+
+/* Project select — rounded */
+[data-theme="nothing"] .project-select {
+	border-radius: 6px;
+}
+
+/* Task group header */
+[data-theme="nothing"] .task-group-header {
+	font-weight: 600;
+}
+
+/* Project sidebar form — rounded */
+[data-theme="nothing"] .project-create-form input {
+	border-radius: 6px 0 0 6px;
+}
+
+[data-theme="nothing"] .project-create-form button {
+	border-radius: 0 6px 6px 0;
+}
+
+/* Toggle — soft rounded */
+[data-theme="nothing"] .toggle-btn {
+	border-radius: 6px;
+	transition: all 0.15s ease;
+}
+
+[data-theme="nothing"] .toggle-btn:hover {
+	border-color: var(--accent);
+	box-shadow: none;
+	background: color-mix(in srgb, var(--accent) 6%, var(--bg-panel));
+}
+
+[data-theme="nothing"] .toggle-btn.checked {
+	box-shadow: none;
+	background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+/* Form inputs — subtle blue border on focus */
+[data-theme="nothing"] .create-top input[type='text']:focus,
+[data-theme="nothing"] .create-extras textarea:focus,
+[data-theme="nothing"] .todo-detail-panel textarea:focus,
+[data-theme="nothing"] .settings-input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+	background: var(--bg-panel);
+	border-radius: 6px;
+}
+
+/* Todo hover — soft warm tint */
+[data-theme="nothing"] .todo-item:hover {
+	background: var(--bg-surface);
+}
+
+/* Active todo — subtle left accent */
+[data-theme="nothing"] .todo-item.active .todo-row {
+	box-shadow: inset 3px 0 0 0 var(--accent);
+	background: color-mix(in srgb, var(--accent) 4%, var(--bg-panel));
+}
+
+/* Section labels — plain */
+[data-theme="nothing"] [data-label]::before {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+/* Tagline — muted, no glow */
+[data-theme="nothing"] .main-header .tagline {
+	text-shadow: none;
+	color: var(--text-muted);
+}
+
+/* Toggle buttons — rounded, clean */
+[data-theme="nothing"] .toggle-sidebar-btn,
+[data-theme="nothing"] .toggle-detail-btn {
+	border-radius: 6px;
+}
+
+/* Pomo dots — soft */
+[data-theme="nothing"] .pomo-dot {
+	border-color: var(--border-color);
+}
+
+[data-theme="nothing"] .pomo-dot.filled {
+	box-shadow: none;
+}
+
+/* Theme button — dark accent, white text when active */
+[data-theme="nothing"] .theme-btn.active {
+	box-shadow: none;
+	background: var(--accent);
+	color: #FFFFFF;
+	border-color: var(--accent);
+}
+
+/* Sidebar active tab — left accent bar */
+[data-theme="nothing"] .sidebar-tab.active {
+	box-shadow: inset 3px 0 0 0 var(--accent);
+	background: color-mix(in srgb, var(--accent) 5%, var(--bg-panel));
+}
+
+/* Deadline badge — soft */
+[data-theme="nothing"] .deadline-badge {
+	border-color: var(--border-color);
+	border-radius: 4px;
+}
+
+/* Panel title — clean weight */
+[data-theme="nothing"] .sidebar-panel-title {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+/* Detail panel — clean white */
+[data-theme="nothing"] .detail-panel {
+	background: var(--bg-panel);
+	border-left: 1px solid var(--border-color);
+}
+
+[data-theme="nothing"] .detail-form input:focus,
+[data-theme="nothing"] .detail-form textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+	background: var(--bg-panel);
+	border-radius: 6px;
+}
+
+[data-theme="nothing"] .detail-section-title {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+[data-theme="nothing"] .resource-url:hover {
+	text-shadow: none;
+	color: var(--accent);
+}
+
+/* Calendar today — subtle accent border */
+[data-theme="nothing"] .cal-cell.today {
+	box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 /* ═══ RESPONSIVE (mobile) ═══ */
@@ -1879,6 +2460,25 @@ button:active:not(.todo-title) {
 
 	.menu-btn {
 		display: block;
+	}
+
+	.toggle-sidebar-btn {
+		display: none;
+	}
+
+	.app-layout.sidebar-collapsed {
+		grid-template-columns: 1fr;
+	}
+
+	.app-layout.sidebar-collapsed .sidebar {
+		overflow: visible;
+		border-right: 1px solid var(--border-color);
+		width: var(--sidebar-w);
+		min-width: auto;
+	}
+
+	.app-layout.sidebar-collapsed.detail-open {
+		grid-template-columns: 1fr;
 	}
 
 	.sidebar-overlay {

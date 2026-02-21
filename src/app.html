@@ -7,7 +7,7 @@
 			(function() {
 				try {
 					var t = localStorage.getItem('tiff-theme');
-					if (t && ['signal','paper','void'].includes(t)) {
+					if (t && ['signal','paper','nothing'].includes(t)) {
 						document.documentElement.setAttribute('data-theme', t);
 					}
 				} catch(e) {}

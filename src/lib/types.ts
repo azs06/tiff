@@ -22,10 +22,39 @@ export interface Todo {
 	archivedAt?: number;
 	logs?: TaskLog[];
 	resources?: Resource[];
+	projectId?: string;
+	totalFocusMs?: number;
 }
 
-export type Theme = 'signal' | 'paper' | 'void';
-export const THEMES: Theme[] = ['signal', 'paper', 'void'];
+export interface Project {
+	id: string;
+	name: string;
+	createdAt: number;
+}
+
+export interface FocusSession {
+	id: string;
+	taskId: string;
+	startedAt: number;
+	endedAt?: number;
+	endReason?: 'switch' | 'done' | 'manual';
+}
+
+export interface FocusState {
+	activeTaskId: string;
+	focusedAt: number;
+	pomodoro?: {
+		startedAt: number;
+		duration: number;
+		type: 'work' | 'short-break' | 'long-break';
+		completedPomodoros: number;
+		paused: boolean;
+		pausedRemaining?: number;
+	};
+}
+
+export type Theme = 'signal' | 'paper' | 'nothing';
+export const THEMES: Theme[] = ['signal', 'paper', 'nothing'];
 
 export interface UserSettings {
 	workMs: number;

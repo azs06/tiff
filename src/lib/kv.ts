@@ -1,4 +1,4 @@
-import type { Todo, PomodoroLog, TimerState, UserSettings, TaskLog, Resource } from './types';
+import type { Todo, PomodoroLog, TimerState, UserSettings, TaskLog, Resource, Project, FocusState, FocusSession } from './types';
 import { DEFAULT_SETTINGS } from './types';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
@@ -14,7 +14,7 @@ export async function createTodo(
 	kv: KVNamespace,
 	email: string,
 	title: string,
-	opts?: { detail?: string; deadline?: number }
+	opts?: { detail?: string; deadline?: number; projectId?: string }
 ): Promise<void> {
 	const todos = await getTodos(kv, email);
 	const todo: Todo = {
@@ -25,6 +25,7 @@ export async function createTodo(
 	};
 	if (opts?.detail) todo.detail = opts.detail;
 	if (opts?.deadline) todo.deadline = opts.deadline;
+	if (opts?.projectId) todo.projectId = opts.projectId;
 	todos.unshift(todo);
 	await saveTodos(kv, email, todos);
 }
@@ -161,4 +162,74 @@ export async function deleteResource(kv: KVNamespace, email: string, todoId: str
 	if (!todo || !todo.resources) return;
 	todo.resources = todo.resources.filter((r) => r.id !== resourceId);
 	await saveTodos(kv, email, todos);
+}
+
+// ── Projects ──
+
+export async function getProjects(kv: KVNamespace, email: string): Promise<Project[]> {
+	const data = await kv.get(`projects:${email}`, 'json');
+	return (data as Project[]) ?? [];
+}
+
+export async function saveProjects(kv: KVNamespace, email: string, projects: Project[]): Promise<void> {
+	await kv.put(`projects:${email}`, JSON.stringify(projects));
+}
+
+// ── Focus state ──
+
+export async function getFocus(kv: KVNamespace, email: string): Promise<FocusState | null> {
+	const data = await kv.get(`focus:${email}`, 'json');
+	return (data as FocusState) ?? null;
+}
+
+export async function saveFocus(kv: KVNamespace, email: string, focus: FocusState | null): Promise<void> {
+	if (focus === null) {
+		await kv.delete(`focus:${email}`);
+	} else {
+		await kv.put(`focus:${email}`, JSON.stringify(focus));
+	}
+}
+
+// ── Focus sessions ──
+
+export async function getSessions(kv: KVNamespace, email: string): Promise<FocusSession[]> {
+	const data = await kv.get(`sessions:${email}`, 'json');
+	return (data as FocusSession[]) ?? [];
+}
+
+export async function saveSessions(kv: KVNamespace, email: string, sessions: FocusSession[]): Promise<void> {
+	await kv.put(`sessions:${email}`, JSON.stringify(sessions));
+}
+
+export async function endActiveSession(
+	kv: KVNamespace,
+	email: string,
+	reason: FocusSession['endReason']
+): Promise<void> {
+	const sessions = await getSessions(kv, email);
+	const active = sessions.find((s) => !s.endedAt);
+	if (!active) return;
+
+	active.endedAt = Date.now();
+	active.endReason = reason;
+	await saveSessions(kv, email, sessions);
+
+	// Update totalFocusMs on the task
+	const duration = active.endedAt - active.startedAt;
+	const todos = await getTodos(kv, email);
+	const todo = todos.find((t) => t.id === active.taskId);
+	if (todo) {
+		todo.totalFocusMs = (todo.totalFocusMs ?? 0) + duration;
+		await saveTodos(kv, email, todos);
+	}
+}
+
+export async function startSession(kv: KVNamespace, email: string, taskId: string): Promise<void> {
+	const sessions = await getSessions(kv, email);
+	sessions.push({
+		id: crypto.randomUUID(),
+		taskId,
+		startedAt: Date.now()
+	});
+	await saveSessions(kv, email, sessions);
 }
