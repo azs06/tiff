@@ -473,16 +473,6 @@
 			>CALENDAR</button>
 		</nav>
 
-		<div class="theme-switcher">
-			{#each THEMES as t}
-				<button
-					class="theme-btn"
-					class:active={theme === t}
-					onclick={() => setTheme(t)}
-				>{t.toUpperCase()}</button>
-			{/each}
-		</div>
-
 		{#if sidebarPanel === 'settings'}
 			<div class="sidebar-panel">
 				<div class="sidebar-panel-title">TIMER SETTINGS</div>
@@ -541,6 +531,16 @@
 					<div class="settings-hint">Long break triggers every 4 pomodoros</div>
 					<button type="submit" class="btn-save" style="margin-top: 1rem; width: 100%;">SAVE</button>
 				</form>
+				<div class="sidebar-panel-title" style="margin-top: 1.5rem;">THEME</div>
+				<div class="theme-switcher">
+					{#each THEMES as t}
+						<button
+							class="theme-btn"
+							class:active={theme === t}
+							onclick={() => setTheme(t)}
+						>{t.toUpperCase()}</button>
+					{/each}
+				</div>
 			</div>
 		{/if}
 

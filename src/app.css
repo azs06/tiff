@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&family=Azeret+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
 	--bg-deep:      #F4F4EF;
@@ -45,24 +46,24 @@
 	--hero-text:    #F7F3ED;
 }
 
-/* ═══ THEME: VOID ═══ */
+/* ═══ THEME: NOTHING ═══ */
 
-[data-theme="void"] {
-	--bg-deep:      #0A0A0F;
-	--bg-panel:     #111118;
-	--bg-surface:   #16161F;
-	--bg-elevated:  #1E1E28;
-	--text-primary: #E0E0E8;
-	--text-muted:   #6E6E82;
-	--text-dim:     #3A3A4A;
-	--accent:       #00E5FF;
-	--accent-dark:  #00B4CC;
-	--danger:       #FF3355;
-	--border-color: #2A2A36;
-	--font:         'Outfit', sans-serif;
-	--font-display: 'Azeret Mono', monospace;
-	--hero-bg:      #06060A;
-	--hero-text:    #E0E0E8;
+[data-theme="nothing"] {
+	--bg-deep:      #FFFFFF;
+	--bg-panel:     #FFFFFF;
+	--bg-surface:   #F5F5F5;
+	--bg-elevated:  #EBEBEB;
+	--text-primary: #1A1A1A;
+	--text-muted:   #888888;
+	--text-dim:     #C0C0C0;
+	--accent:       #1A1A1A;
+	--accent-dark:  #000000;
+	--danger:       #EB5757;
+	--border-color: #E0E0E0;
+	--font:         'Inter', sans-serif;
+	--font-display: 'Inter', sans-serif;
+	--hero-bg:      #FFFFFF;
+	--hero-text:    #1A1A1A;
 }
 
 *,
@@ -1644,203 +1645,256 @@ button:active:not(.todo-title) {
 	letter-spacing: 0.08em;
 }
 
-/* ═══ VOID THEME OVERRIDES ═══ */
+/* ═══ NOTHING THEME OVERRIDES ═══ */
 
-/* Texture: subtle dark grain */
-[data-theme="void"] body::before {
-	opacity: 0.03;
+/* No texture */
+[data-theme="nothing"] body::before {
+	opacity: 0;
 }
 
 /* No scanlines */
-[data-theme="void"] body::after {
+[data-theme="nothing"] body::after {
 	background: none;
 }
 
-/* Deeper vignette */
-[data-theme="void"] .main-content::after {
-	background: radial-gradient(
-		ellipse at center,
-		transparent 30%,
-		rgba(0, 0, 0, 0.35) 100%
-	);
+/* No vignette */
+[data-theme="nothing"] .main-content::after {
+	background: none;
 }
 
-/* Sidebar — atmospheric gradient */
-[data-theme="void"] .sidebar {
-	background: linear-gradient(180deg, #0E0E16 0%, var(--bg-panel) 100%);
-	border-right-color: #1E1E2A;
+/* Sidebar — clean white, subtle border */
+[data-theme="nothing"] .sidebar {
+	background: var(--bg-panel);
+	border-right: 1px solid var(--border-color);
 }
 
-/* Header — stronger cyan glow */
-[data-theme="void"] .sidebar-header {
-	box-shadow:
-		0 -8px 30px -4px color-mix(in srgb, var(--accent) 40%, transparent),
-		inset 0 1px 0 0 color-mix(in srgb, var(--accent) 15%, transparent);
+/* Header — no glow, subtle bottom border */
+[data-theme="nothing"] .sidebar-header {
+	box-shadow: none;
+	border-bottom: 1px solid var(--border-color);
 }
 
-/* Logo — subtle text glow, no glitch */
-[data-theme="void"] .sidebar-header h1 {
-	text-shadow: 0 0 25px color-mix(in srgb, var(--accent) 20%, transparent);
+/* Logo — clean, no effects */
+[data-theme="nothing"] .sidebar-header h1 {
+	text-shadow: none;
+	font-weight: 700;
+	letter-spacing: 0.04em;
 }
 
-[data-theme="void"] .sidebar-header h1:hover {
+[data-theme="nothing"] .sidebar-header h1:hover {
 	animation: none;
 	color: var(--accent);
-	text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 40%, transparent);
+	text-shadow: none;
 }
 
-/* Buttons — glow transitions */
-[data-theme="void"] button {
+/* Buttons — soft rounded, gentle transitions */
+[data-theme="nothing"] button {
+	border-radius: 6px;
 	transition: all 0.15s ease;
 }
 
-[data-theme="void"] button:hover {
-	box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent);
+[data-theme="nothing"] button:hover:not(.todo-title) {
+	box-shadow: none;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-color: var(--border-color);
 }
 
-[data-theme="void"] button:active {
-	box-shadow: 0 0 20px color-mix(in srgb, var(--danger) 40%, transparent);
-}
-
-/* Hero — gradient depth, mega neon bar */
-[data-theme="void"] .hero {
-	background: linear-gradient(180deg, #04040A 0%, #0C0C18 50%, #04040A 100%);
-}
-
-[data-theme="void"] .hero::before {
-	box-shadow:
-		0 0 20px var(--accent),
-		0 0 60px color-mix(in srgb, var(--accent) 60%, transparent),
-		0 0 100px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-/* Hero label — glow */
-[data-theme="void"] .hero-label {
-	text-shadow: 0 0 20px color-mix(in srgb, var(--accent) 50%, transparent);
-}
-
-/* Timer — triple-layer glow */
-[data-theme="void"] .timer-display {
-	text-shadow:
-		0 0 30px color-mix(in srgb, var(--accent) 65%, transparent),
-		0 0 80px color-mix(in srgb, var(--accent) 35%, transparent),
-		0 0 140px color-mix(in srgb, var(--accent) 15%, transparent);
-}
-
-/* Hero buttons — glow border on hover */
-[data-theme="void"] .btn-hero {
-	border-color: color-mix(in srgb, var(--hero-text) 35%, transparent);
-	transition: all 0.15s ease;
-}
-
-[data-theme="void"] .btn-hero:hover {
-	box-shadow:
-		0 0 20px color-mix(in srgb, var(--accent) 40%, transparent),
-		inset 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-/* Toggle — glow */
-[data-theme="void"] .toggle-btn {
-	transition: all 0.15s ease;
-}
-
-[data-theme="void"] .toggle-btn:hover {
-	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent),
-		inset 0 0 0 1px var(--accent);
-}
-
-[data-theme="void"] .toggle-btn.checked {
-	box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-/* Form inputs — cyan glow on focus */
-[data-theme="void"] .create-top input[type='text']:focus,
-[data-theme="void"] .create-extras textarea:focus,
-[data-theme="void"] .todo-detail-panel textarea:focus,
-[data-theme="void"] .settings-input:focus {
-	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent),
-		inset 0 0 0 1px var(--accent);
+[data-theme="nothing"] button:active:not(.todo-title) {
+	box-shadow: none;
 	background: var(--bg-elevated);
+	color: var(--text-primary);
+	border-color: var(--border-color);
 }
 
-/* Todo hover — subtle cyan tint */
-[data-theme="void"] .todo-item:hover {
-	background: color-mix(in srgb, var(--accent) 3%, var(--bg-panel));
+/* Accent-bg elements — white text on dark accent */
+[data-theme="nothing"] .btn-accent,
+[data-theme="nothing"] .btn-hero.btn-accent {
+	color: #FFFFFF;
+	box-shadow: none;
 }
 
-/* Active todo — glow left edge */
-[data-theme="void"] .todo-item.active .todo-row {
-	box-shadow: inset 6px 0 16px -6px color-mix(in srgb, var(--accent) 30%, transparent);
+[data-theme="nothing"] .btn-accent:hover,
+[data-theme="nothing"] .btn-hero.btn-accent:hover {
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	box-shadow: none;
+	border-color: var(--border-color);
 }
 
-/* Section labels — text glow */
-[data-theme="void"] [data-label]::before {
-	text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .btn-save {
+	color: #FFFFFF;
 }
 
-/* Tagline — subtle glow */
-[data-theme="void"] .main-header .tagline {
-	text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 15%, transparent);
+[data-theme="nothing"] .deadline-opt.selected {
+	color: #FFFFFF;
 }
 
-/* Cycle dots — glow on filled */
-[data-theme="void"] .dot {
-	border-color: #3A3A4A;
+[data-theme="nothing"] .detail-badge.done {
+	color: #FFFFFF;
 }
 
-[data-theme="void"] .dot.filled {
-	box-shadow:
-		0 0 10px color-mix(in srgb, var(--accent) 55%, transparent),
-		0 0 25px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .toggle-btn.checked {
+	background: var(--accent);
+	color: #FFFFFF;
 }
 
-/* Theme button — strong glow when active */
-[data-theme="void"] .theme-btn.active {
-	box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent);
+/* Hero — light, spacious, no gradient */
+[data-theme="nothing"] .hero {
+	background: var(--bg-panel);
+	border-bottom: 1px solid var(--border-color);
 }
 
-/* Sidebar active tab — glow */
-[data-theme="void"] .sidebar-tab.active {
-	box-shadow: inset 4px 0 12px -4px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .hero::before {
+	box-shadow: none;
+	background: var(--accent);
+	opacity: 0.6;
+	height: 2px;
 }
 
-/* Deadline badge */
-[data-theme="void"] .deadline-badge {
-	border-color: #3A3A4A;
+/* Hero label — plain, no glow */
+[data-theme="nothing"] .hero-label {
+	text-shadow: none;
+	color: var(--text-muted);
 }
 
-/* Panel title — glow */
-[data-theme="void"] .sidebar-panel-title {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 15%, transparent);
+/* Timer — clean, bold weight */
+[data-theme="nothing"] .timer-display {
+	text-shadow: none;
+	font-weight: 700;
+	color: var(--text-primary);
 }
 
-/* Detail panel — dark gradient */
-[data-theme="void"] .detail-panel {
-	background: linear-gradient(180deg, #0E0E16 0%, var(--bg-panel) 100%);
-	border-left-color: #1E1E2A;
+/* Hero buttons — soft border, rounded */
+[data-theme="nothing"] .btn-hero {
+	border-color: var(--border-color);
+	border-radius: 6px;
+	color: var(--text-primary);
+	transition: all 0.15s ease;
 }
 
-[data-theme="void"] .detail-form input:focus,
-[data-theme="void"] .detail-form textarea:focus {
+[data-theme="nothing"] .btn-hero:hover {
+	box-shadow: none;
+	background: var(--bg-surface);
 	border-color: var(--accent);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent),
-		inset 0 0 0 1px var(--accent);
-	background: var(--bg-elevated);
+	color: var(--accent);
 }
 
-[data-theme="void"] .detail-section-title {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 15%, transparent);
+/* Toggle — soft rounded */
+[data-theme="nothing"] .toggle-btn {
+	border-radius: 6px;
+	transition: all 0.15s ease;
 }
 
-[data-theme="void"] .resource-url:hover {
-	text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent);
+[data-theme="nothing"] .toggle-btn:hover {
+	border-color: var(--accent);
+	box-shadow: none;
+	background: color-mix(in srgb, var(--accent) 6%, var(--bg-panel));
 }
 
-/* Calendar today — stronger glow */
-[data-theme="void"] .cal-cell.today {
-	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
+[data-theme="nothing"] .toggle-btn.checked {
+	box-shadow: none;
+	background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+/* Form inputs — subtle blue border on focus */
+[data-theme="nothing"] .create-top input[type='text']:focus,
+[data-theme="nothing"] .create-extras textarea:focus,
+[data-theme="nothing"] .todo-detail-panel textarea:focus,
+[data-theme="nothing"] .settings-input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+	background: var(--bg-panel);
+	border-radius: 6px;
+}
+
+/* Todo hover — soft warm tint */
+[data-theme="nothing"] .todo-item:hover {
+	background: var(--bg-surface);
+}
+
+/* Active todo — subtle left accent */
+[data-theme="nothing"] .todo-item.active .todo-row {
+	box-shadow: inset 3px 0 0 0 var(--accent);
+	background: color-mix(in srgb, var(--accent) 4%, var(--bg-panel));
+}
+
+/* Section labels — plain */
+[data-theme="nothing"] [data-label]::before {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+/* Tagline — muted, no glow */
+[data-theme="nothing"] .main-header .tagline {
+	text-shadow: none;
+	color: var(--text-muted);
+}
+
+/* Cycle dots — soft */
+[data-theme="nothing"] .dot {
+	border-color: var(--border-color);
+}
+
+[data-theme="nothing"] .dot.filled {
+	box-shadow: none;
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+/* Theme button — dark accent, white text when active */
+[data-theme="nothing"] .theme-btn.active {
+	box-shadow: none;
+	background: var(--accent);
+	color: #FFFFFF;
+	border-color: var(--accent);
+}
+
+/* Sidebar active tab — left accent bar */
+[data-theme="nothing"] .sidebar-tab.active {
+	box-shadow: inset 3px 0 0 0 var(--accent);
+	background: color-mix(in srgb, var(--accent) 5%, var(--bg-panel));
+}
+
+/* Deadline badge — soft */
+[data-theme="nothing"] .deadline-badge {
+	border-color: var(--border-color);
+	border-radius: 4px;
+}
+
+/* Panel title — clean weight */
+[data-theme="nothing"] .sidebar-panel-title {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+/* Detail panel — clean white */
+[data-theme="nothing"] .detail-panel {
+	background: var(--bg-panel);
+	border-left: 1px solid var(--border-color);
+}
+
+[data-theme="nothing"] .detail-form input:focus,
+[data-theme="nothing"] .detail-form textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+	background: var(--bg-panel);
+	border-radius: 6px;
+}
+
+[data-theme="nothing"] .detail-section-title {
+	text-shadow: none;
+	font-weight: 600;
+}
+
+[data-theme="nothing"] .resource-url:hover {
+	text-shadow: none;
+	color: var(--accent);
+}
+
+/* Calendar today — subtle accent border */
+[data-theme="nothing"] .cal-cell.today {
+	box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 /* ═══ RESPONSIVE (mobile) ═══ */

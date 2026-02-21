@@ -24,8 +24,8 @@ export interface Todo {
 	resources?: Resource[];
 }
 
-export type Theme = 'signal' | 'paper' | 'void';
-export const THEMES: Theme[] = ['signal', 'paper', 'void'];
+export type Theme = 'signal' | 'paper' | 'nothing';
+export const THEMES: Theme[] = ['signal', 'paper', 'nothing'];
 
 export interface UserSettings {
 	workMs: number;
