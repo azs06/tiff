@@ -1,4 +1,15 @@
-import type { Todo, PomodoroLog, TimerState, UserSettings, TaskLog, Resource, Project, FocusState, FocusSession } from './types';
+import type {
+	Todo,
+	PomodoroLog,
+	TimerState,
+	UserSettings,
+	TaskLog,
+	Resource,
+	Project,
+	ProjectAttachment,
+	FocusState,
+	FocusSession
+} from './types';
 import { DEFAULT_SETTINGS } from './types';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
@@ -146,33 +157,118 @@ export async function deleteTaskLog(kv: KVNamespace, email: string, todoId: stri
 	await saveTodos(kv, email, todos);
 }
 
-export async function addResource(kv: KVNamespace, email: string, todoId: string, url: string, label?: string): Promise<void> {
-	const todos = await getTodos(kv, email);
-	const todo = todos.find((t) => t.id === todoId);
-	if (!todo) return;
-	const resource: Resource = { id: crypto.randomUUID(), url, createdAt: Date.now() };
-	if (label) resource.label = label;
-	todo.resources = [...(todo.resources ?? []), resource];
-	await saveTodos(kv, email, todos);
-}
-
-export async function deleteResource(kv: KVNamespace, email: string, todoId: string, resourceId: string): Promise<void> {
-	const todos = await getTodos(kv, email);
-	const todo = todos.find((t) => t.id === todoId);
-	if (!todo || !todo.resources) return;
-	todo.resources = todo.resources.filter((r) => r.id !== resourceId);
-	await saveTodos(kv, email, todos);
-}
-
 // ── Projects ──
+
+function normalizeProject(project: Project): Project {
+	const normalized: Project = {
+		id: project.id,
+		name: project.name,
+		createdAt: project.createdAt
+	};
+	if (project.detail) normalized.detail = project.detail;
+	if (project.resources && project.resources.length > 0) normalized.resources = project.resources;
+	if (project.attachments && project.attachments.length > 0) normalized.attachments = project.attachments;
+	return normalized;
+}
 
 export async function getProjects(kv: KVNamespace, email: string): Promise<Project[]> {
 	const data = await kv.get(`projects:${email}`, 'json');
-	return (data as Project[]) ?? [];
+	const projects = (data as Project[]) ?? [];
+	return projects.map((p) => normalizeProject(p));
 }
 
 export async function saveProjects(kv: KVNamespace, email: string, projects: Project[]): Promise<void> {
-	await kv.put(`projects:${email}`, JSON.stringify(projects));
+	await kv.put(`projects:${email}`, JSON.stringify(projects.map((p) => normalizeProject(p))));
+}
+
+export async function updateProject(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	patch: { name?: string; detail?: string | null }
+): Promise<void> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === projectId);
+	if (!project) return;
+
+	if (patch.name !== undefined) {
+		if (patch.name) project.name = patch.name;
+	}
+
+	if (patch.detail !== undefined) {
+		if (patch.detail) project.detail = patch.detail;
+		else delete project.detail;
+	}
+
+	await saveProjects(kv, email, projects);
+}
+
+export async function addProjectResource(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	url: string,
+	label?: string
+): Promise<void> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === projectId);
+	if (!project) return;
+
+	const resource: Resource = { id: crypto.randomUUID(), url, createdAt: Date.now() };
+	if (label) resource.label = label;
+	project.resources = [...(project.resources ?? []), resource];
+	await saveProjects(kv, email, projects);
+}
+
+export async function deleteProjectResource(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	resourceId: string
+): Promise<void> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === projectId);
+	if (!project || !project.resources) return;
+
+	project.resources = project.resources.filter((r) => r.id !== resourceId);
+	if (project.resources.length === 0) delete project.resources;
+	await saveProjects(kv, email, projects);
+}
+
+export async function addProjectAttachment(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	attachment: Omit<ProjectAttachment, 'createdAt'>
+): Promise<ProjectAttachment | null> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === projectId);
+	if (!project) return null;
+
+	const nextAttachment: ProjectAttachment = {
+		...attachment,
+		createdAt: Date.now()
+	};
+	project.attachments = [...(project.attachments ?? []), nextAttachment];
+	await saveProjects(kv, email, projects);
+	return nextAttachment;
+}
+
+export async function deleteProjectAttachment(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	attachmentId: string
+): Promise<ProjectAttachment | null> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === projectId);
+	if (!project || !project.attachments) return null;
+
+	const attachment = project.attachments.find((a) => a.id === attachmentId) ?? null;
+	project.attachments = project.attachments.filter((a) => a.id !== attachmentId);
+	if (project.attachments.length === 0) delete project.attachments;
+	await saveProjects(kv, email, projects);
+	return attachment;
 }
 
 // ── Focus state ──

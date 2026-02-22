@@ -24,6 +24,7 @@
 	--sidebar-w:    304px;
 	--detail-w:     340px;
 	--content-pad:  2rem;
+	--layout-max-w: 1260px;
 }
 
 /* ═══ THEME: PAPER ═══ */
@@ -135,6 +136,59 @@ body::after {
 }
 
 /* ═══ FULL-SCREEN GRID LAYOUT ═══ */
+
+.app-shell {
+	max-width: var(--layout-max-w);
+	min-height: 100vh;
+	margin: 0 auto;
+	display: grid;
+	grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+	border-left: 1px solid var(--border-color);
+	border-right: 1px solid var(--border-color);
+	position: relative;
+	z-index: 1;
+}
+
+.left-sidebar {
+	background: var(--bg-panel);
+	border-right: 1px solid var(--border-color);
+	display: flex;
+	flex-direction: column;
+	position: sticky;
+	top: 0;
+	height: 100vh;
+}
+
+.left-nav {
+	display: flex;
+	flex-direction: column;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-header h1 a {
+	color: inherit;
+	text-decoration: none;
+}
+
+.sidebar-tab {
+	display: block;
+	text-decoration: none;
+}
+
+.content-shell {
+	min-width: 0;
+	background: var(--bg-panel);
+}
+
+.home-layout {
+	display: grid;
+	grid-template-columns: 1fr;
+	min-height: 100vh;
+}
+
+.home-layout.detail-open {
+	grid-template-columns: minmax(0, 1fr) var(--detail-w);
+}
 
 .app-layout {
 	display: grid;
@@ -609,6 +663,12 @@ body::after {
 	background: transparent;
 }
 
+.project-attachment-size {
+	font-size: 0.58rem;
+	color: var(--text-dim);
+	white-space: nowrap;
+}
+
 /* Log entries */
 .log-list {
 	display: flex;
@@ -674,7 +734,8 @@ body::after {
 }
 
 .detail-form input[type='text'],
-.detail-form input[type='url'] {
+.detail-form input[type='url'],
+.detail-form input[type='file'] {
 	font-family: var(--font);
 	font-size: 0.75rem;
 	padding: 0.45rem 0.65rem;
@@ -686,7 +747,8 @@ body::after {
 }
 
 .detail-form input[type='text']:focus,
-.detail-form input[type='url']:focus {
+.detail-form input[type='url']:focus,
+.detail-form input[type='file']:focus {
 	border-color: var(--accent);
 	box-shadow: inset 0 0 0 1px var(--accent);
 	background: #fff;
@@ -758,6 +820,17 @@ body::after {
 
 .task-meta-sep {
 	color: var(--border-color);
+}
+
+.task-project-pill {
+	font-size: 0.55rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	padding: 0.2rem 0.45rem;
+	border: 1px solid var(--border-color);
+	color: var(--text-muted);
+	white-space: nowrap;
+	flex-shrink: 0;
 }
 
 /* ═══ MAIN CONTENT ═══ */
@@ -836,6 +909,90 @@ body::after {
 .toggle-detail-btn:hover {
 	background: var(--bg-elevated);
 	color: var(--text-primary);
+}
+
+.home-header {
+	justify-content: space-between;
+}
+
+.view-main {
+	min-height: 100vh;
+}
+
+.view-header {
+	border-bottom: 1px solid var(--border-color);
+}
+
+.view-page {
+	padding: 1rem var(--content-pad) 1.2rem;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.archive-list-page {
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+}
+
+.calendar-page-card {
+	max-width: 520px;
+	padding: 0.8rem;
+	border: 1px solid var(--border-color);
+	background: var(--bg-surface);
+}
+
+.project-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 1rem;
+}
+
+.project-card {
+	border: 1px solid var(--border-color);
+	background: var(--bg-surface);
+	display: flex;
+	flex-direction: column;
+}
+
+.project-card-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.9rem 1rem;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.project-card-header h2 {
+	font-size: 0.9rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.project-card-meta {
+	display: flex;
+	gap: 0.6rem;
+	margin-top: 0.35rem;
+	font-size: 0.62rem;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.project-card-section {
+	padding: 0.9rem 1rem;
+	border-top: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.settings-page-form {
+	max-width: 360px;
+}
+
+.settings-theme-switcher {
+	padding: 0;
+	border: none;
+	max-width: 420px;
 }
 
 /* ═══ SECTION LABELS (data-label) ═══ */
@@ -2429,6 +2586,38 @@ button:active:not(.todo-title) {
 @media (max-width: 768px) {
 	:root {
 		--content-pad: 1rem;
+	}
+
+	.app-shell {
+		max-width: 100%;
+		grid-template-columns: 1fr;
+		border-left: none;
+		border-right: none;
+	}
+
+	.left-sidebar {
+		position: sticky;
+		top: 0;
+		height: auto;
+		z-index: 200;
+		border-right: none;
+		border-bottom: 1px solid var(--border-color);
+	}
+
+	.left-nav {
+		flex-direction: row;
+		overflow-x: auto;
+		border-bottom: none;
+	}
+
+	.left-nav .sidebar-tab {
+		border-bottom: none;
+		border-right: 1px solid var(--border-color);
+		white-space: nowrap;
+	}
+
+	.home-layout.detail-open {
+		grid-template-columns: 1fr;
 	}
 
 	/* ── Grid: single column ── */

@@ -10,3 +10,8 @@ binding = "ASSETS"
 [[kv_namespaces]]
 binding = "TIFF_KV"
 id = "e02956f78fa64637ad72b37805219bf1"
+
+[[r2_buckets]]
+binding = "TIFF_ATTACHMENTS"
+bucket_name = "tiff-attachments"
+preview_bucket_name = "tiff-attachments"

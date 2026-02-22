@@ -21,15 +21,27 @@ export interface Todo {
 	archived?: boolean;
 	archivedAt?: number;
 	logs?: TaskLog[];
-	resources?: Resource[];
 	projectId?: string;
 	totalFocusMs?: number;
+}
+
+export interface ProjectAttachment {
+	id: string;
+	name: string;
+	url: string;
+	key?: string;
+	contentType?: string;
+	size?: number;
+	createdAt: number;
 }
 
 export interface Project {
 	id: string;
 	name: string;
 	createdAt: number;
+	detail?: string;
+	resources?: Resource[];
+	attachments?: ProjectAttachment[];
 }
 
 export interface FocusSession {

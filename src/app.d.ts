@@ -6,6 +6,7 @@ declare global {
 		interface Platform {
 			env: {
 				TIFF_KV: KVNamespace;
+				TIFF_ATTACHMENTS: R2Bucket;
 			};
 		}
 	}
