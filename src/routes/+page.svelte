@@ -586,18 +586,22 @@
 	></div>
 
 	<main class="main-content">
-		<header class="main-header home-header">
-			<span class="tagline">Todo in your focus</span>
-			{#if detailTaskId}
-				<button
-					class="toggle-detail-btn"
-					onclick={toggleDetail}
-					title={detailOpen ? "Hide details" : "Show details"}
-				>
-					{detailOpen ? "▶" : "◀"}
-				</button>
-			{/if}
-		</header>
+			<header class="main-header home-header">
+				<span class="tagline">Todo in your focus</span>
+				{#if detailTaskId}
+					<button
+						type="button"
+						class="toggle-detail-btn"
+						class:open={detailOpen}
+						onclick={toggleDetail}
+						aria-label={detailOpen ? "Hide details panel" : "Show details panel"}
+						aria-expanded={detailOpen}
+						title={detailOpen ? "Hide details" : "Show details"}
+					>
+						<span class="toggle-detail-btn-icon" aria-hidden="true"></span>
+					</button>
+				{/if}
+			</header>
 
 		{#if focus && focusedTodo}
 			<section class="hero-focus">

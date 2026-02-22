@@ -5,9 +5,17 @@
 	import '../app.css';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
+	let leftSidebarOpen = $state(true);
+	let sidebarPrefHydrated = false;
+
+	const SIDEBAR_PREF_KEY = 'tiff-left-sidebar-open';
 
 	function isActive(pathname: string, href: string): boolean {
 		return href === '/' ? pathname === '/' : pathname.startsWith(href);
+	}
+
+	function toggleLeftSidebar() {
+		leftSidebarOpen = !leftSidebarOpen;
 	}
 
 	function resolveTheme(): Theme {
@@ -17,9 +25,21 @@
 	}
 
 	$effect(() => {
+		if (sidebarPrefHydrated) return;
+		sidebarPrefHydrated = true;
+		const stored = localStorage.getItem(SIDEBAR_PREF_KEY);
+		if (stored === '0') leftSidebarOpen = false;
+	});
+
+	$effect(() => {
 		const nextTheme = resolveTheme();
 		document.documentElement.setAttribute('data-theme', nextTheme);
 		localStorage.setItem('tiff-theme', nextTheme);
+	});
+
+	$effect(() => {
+		if (!sidebarPrefHydrated) return;
+		localStorage.setItem(SIDEBAR_PREF_KEY, leftSidebarOpen ? '1' : '0');
 	});
 </script>
 
@@ -27,7 +47,7 @@
 	<title>TIFF</title>
 </svelte:head>
 
-<div class="app-shell">
+<div class="app-shell" class:left-sidebar-collapsed={!leftSidebarOpen}>
 	<aside class="left-sidebar">
 		<div class="sidebar-header">
 			<h1><a href="/">TIFF</a></h1>
@@ -42,6 +62,16 @@
 	</aside>
 
 	<div class="content-shell">
+		<button
+			type="button"
+			class="left-sidebar-arrow"
+			class:collapsed={!leftSidebarOpen}
+			onclick={toggleLeftSidebar}
+			aria-label={leftSidebarOpen ? 'Hide navigation sidebar' : 'Show navigation sidebar'}
+			aria-expanded={leftSidebarOpen}
+		>
+			<span class="left-sidebar-arrow-icon" aria-hidden="true"></span>
+		</button>
 		{@render children()}
 	</div>
 </div>
