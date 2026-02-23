@@ -55,6 +55,9 @@ export interface FocusSession {
 export interface FocusState {
 	activeTaskId: string;
 	focusedAt: number;
+	sessionPaused?: boolean;
+	pausedAt?: number;
+	accumulatedPauseMs?: number;
 	pomodoro?: {
 		startedAt: number;
 		duration: number;

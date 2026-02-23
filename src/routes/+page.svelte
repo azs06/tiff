@@ -86,7 +86,6 @@
 		if (server) {
 			focus = server;
 			localStorage.setItem("tiff-focus", JSON.stringify(server));
-			detailTaskId = server.activeTaskId;
 		} else {
 			localStorage.removeItem("tiff-focus");
 		}
@@ -135,8 +134,16 @@
 			return;
 		}
 		const start = focus.focusedAt;
+		const accumulated = focus.accumulatedPauseMs ?? 0;
+
+		if (focus.sessionPaused) {
+			const pausedDuration = focus.pausedAt ? Date.now() - focus.pausedAt : 0;
+			sessionElapsed = Date.now() - start - accumulated - pausedDuration;
+			return;
+		}
+
 		const tick = () => {
-			sessionElapsed = Date.now() - start;
+			sessionElapsed = Date.now() - start - accumulated;
 		};
 		tick();
 		const id = setInterval(tick, 1000);
@@ -208,14 +215,36 @@
 		setFocus({
 			activeTaskId: taskId,
 			focusedAt: Date.now(),
+			sessionPaused: false,
+			pausedAt: undefined,
+			accumulatedPauseMs: 0,
 		});
-		detailTaskId = taskId;
 		tick().then(() => focusFormEl?.requestSubmit());
 	}
 
 	function unfocusTask() {
 		setFocus(null);
 		unfocusFormEl?.requestSubmit();
+	}
+
+	function pauseSession() {
+		if (!focus || focus.sessionPaused) return;
+		setFocus({
+			...focus,
+			sessionPaused: true,
+			pausedAt: Date.now(),
+		});
+	}
+
+	function resumeSession() {
+		if (!focus || !focus.sessionPaused) return;
+		const pausedDuration = focus.pausedAt ? Date.now() - focus.pausedAt : 0;
+		setFocus({
+			...focus,
+			sessionPaused: false,
+			pausedAt: undefined,
+			accumulatedPauseMs: (focus.accumulatedPauseMs ?? 0) + pausedDuration,
+		});
 	}
 
 	function startPomodoro() {
@@ -322,6 +351,18 @@
 	}
 
 	function pomoStop() {
+		if (!focus?.pomodoro) return;
+		setFocus({
+			...focus,
+			pomodoro: {
+				...focus.pomodoro,
+				paused: true,
+				pausedRemaining: 0,
+			},
+		});
+	}
+
+	function pomoDismiss() {
 		if (!focus) return;
 		setFocus({
 			...focus,
@@ -335,7 +376,7 @@
 	}
 
 	let detailTaskId = $state<string | null>(null);
-	let detailVisible = $state(true);
+	let detailVisible = $state(false);
 	let detailOpen = $derived(detailTaskId !== null && detailVisible);
 
 	let detailTodo = $derived(
@@ -346,13 +387,24 @@
 			: null,
 	);
 
-	function openDetail(todoId: string) {
-		detailTaskId = todoId;
-		detailVisible = true;
-		const todo = [...data.todos, ...data.archivedTodos].find(
-			(t) => t.id === todoId,
-		);
+	let editingTaskId = $state<string | null>(null);
+	let editingTodo = $derived(
+		editingTaskId
+			? (data.todos.find((t) => t.id === editingTaskId) ?? null)
+			: null,
+	);
+
+	let createExpanded = $state(false);
+	let showCreateExtras = $derived(!focus || !!editingTodo || createExpanded);
+
+	$effect(() => {
+		if (focus) createExpanded = false;
+	});
+
+	function openEditForm(todoId: string) {
+		const todo = data.todos.find((t) => t.id === todoId);
 		if (todo) {
+			editingTaskId = todoId;
 			editDetail = todo.detail ?? "";
 			editDeadlineChoice = todo.deadline ? "custom" : "none";
 			editCustomDeadline = todo.deadline
@@ -361,6 +413,43 @@
 						.slice(0, 16)
 				: "";
 		}
+	}
+
+	function closeEditForm() {
+		editingTaskId = null;
+	}
+
+	function hasUnsavedEdits(todoId: string): boolean {
+		const todo = data.todos.find((t) => t.id === todoId);
+		if (!todo) return false;
+		if (editDetail !== (todo.detail ?? "")) return true;
+		const origChoice = todo.deadline ? "custom" : "none";
+		if (editDeadlineChoice !== origChoice) return true;
+		return false;
+	}
+
+	function toggleEditForm(todoId: string) {
+		if (editingTaskId === todoId) {
+			if (!hasUnsavedEdits(todoId)) {
+				editingTaskId = null;
+			}
+			// If unsaved data exists, do nothing (keep form open)
+			return;
+		}
+		openEditForm(todoId);
+		tick().then(() => {
+			const section = document.querySelector('.create-section');
+			if (section) {
+				section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+				section.classList.add('edit-highlight');
+				setTimeout(() => section.classList.remove('edit-highlight'), 600);
+			}
+		});
+	}
+
+	function openDetail(todoId: string) {
+		detailTaskId = todoId;
+		detailVisible = true;
 	}
 
 	function closeDetail() {
@@ -383,6 +472,12 @@
 			)
 		) {
 			detailTaskId = null;
+		}
+	});
+
+	$effect(() => {
+		if (editingTaskId && !data.todos.some((t) => t.id === editingTaskId)) {
+			editingTaskId = null;
 		}
 	});
 
@@ -480,11 +575,28 @@
 		);
 	}
 
-	let focusedLastLog = $derived(
+	let focusedRecentLogs = $derived(
 		focusedTodo?.logs?.length
-			? focusedTodo.logs[focusedTodo.logs.length - 1]
-			: null,
+			? focusedTodo.logs.slice(-3).reverse()
+			: [],
 	);
+
+	let todoGroups = $derived(() => {
+		const groups: { name: string; todos: typeof data.todos }[] = [];
+		const map = new Map<string, typeof data.todos>();
+		for (const todo of data.todos) {
+			const key = todo.projectId ?? '';
+			if (!map.has(key)) map.set(key, []);
+			map.get(key)!.push(todo);
+		}
+		// "INBOX" (no project) first, then named projects
+		const inbox = map.get('');
+		if (inbox) groups.push({ name: 'INBOX', todos: inbox });
+		for (const [key, todos] of map) {
+			if (key !== '') groups.push({ name: getProjectName(key).toUpperCase(), todos });
+		}
+		return groups;
+	});
 
 	let activeTasks = $derived(
 		data.todos.filter((t: { done: boolean }) => !t.done),
@@ -588,15 +700,25 @@
 	<main class="main-content">
 			<header class="main-header home-header">
 				<span class="tagline">Todo in your focus</span>
-				{#if detailTaskId}
+				{#if detailTaskId || focus?.activeTaskId}
 					<button
 						type="button"
 						class="toggle-detail-btn"
 						class:open={detailOpen}
-						onclick={toggleDetail}
-						aria-label={detailOpen ? "Hide details panel" : "Show details panel"}
+						onclick={() => {
+							const taskId = detailTaskId ?? focus?.activeTaskId ?? null;
+							if (taskId) {
+								if (detailTaskId === taskId && detailVisible) {
+									detailVisible = false;
+								} else {
+									detailTaskId = taskId;
+									detailVisible = true;
+								}
+							}
+						}}
+						aria-label={detailOpen ? "Hide history panel" : "Show history panel"}
 						aria-expanded={detailOpen}
-						title={detailOpen ? "Hide details" : "Show details"}
+						title={detailOpen ? "Hide history" : "Show history"}
 					>
 						<span class="toggle-detail-btn-icon" aria-hidden="true"></span>
 					</button>
@@ -606,15 +728,14 @@
 		{#if focus && focusedTodo}
 			<section class="hero-focus">
 				<div class="focus-top-bar">
-					{#if focusedTodo.projectId}
-						<span class="focus-project"
-							>{getProjectName(
-								focusedTodo.projectId,
-							).toUpperCase()}</span
-						>
-					{:else}
-						<span class="focus-project">INBOX</span>
-					{/if}
+					<span class="focus-project"
+						>{focusedTodo.projectId
+							? getProjectName(focusedTodo.projectId).toUpperCase()
+							: "INBOX"}</span
+					>
+				</div>
+
+				<div class="focus-title-row">
 					<form
 						method="POST"
 						action="?/toggle"
@@ -626,17 +747,8 @@
 							type="submit"
 							class="hero-toggle-btn"
 							aria-label="Mark task done"
-							><span class="hero-toggle-label">DONE</span></button
-						>
+						></button>
 					</form>
-					<button
-						class="hero-close"
-						onclick={unfocusTask}
-						aria-label="Unfocus task">UNFOCUS</button
-					>
-				</div>
-
-				<div class="focus-nav-row">
 					{#if prevTask}
 						<button
 							class="focus-nav-btn"
@@ -654,27 +766,48 @@
 							title={nextTask.title}>&rarr;</button
 						>
 					{/if}
+					<button
+						class="hero-edit-icon"
+						class:active={editingTaskId === focusedTodo.id}
+						onclick={() => toggleEditForm(focusedTodo.id)}
+						aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+						title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+					>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
+					<button
+						class="hero-pause-icon"
+						class:paused={focus?.sessionPaused}
+						onclick={() => focus?.sessionPaused ? resumeSession() : pauseSession()}
+						aria-label={focus?.sessionPaused ? "Resume session" : "Pause session"}
+						title={focus?.sessionPaused ? "Resume session" : "Pause session"}
+					>{focus?.sessionPaused ? '▶' : '⏸'}</button>
+					<button
+						class="hero-stop-icon"
+						onclick={unfocusTask}
+						aria-label="Stop session"
+						title="Stop session"
+					>■</button>
 				</div>
 
 				{#if focusedTodo.detail}
 					<p class="focus-detail">{focusedTodo.detail}</p>
 				{/if}
 
-				{#if focusedLastLog}
-					<div class="focus-last-log">
-						<span class="focus-log-label">LAST LOG</span>
-						<span class="focus-log-time"
-							>{relativeTime(focusedLastLog.createdAt)}</span
-						>
-						<p class="focus-log-text">
-							{@html renderMarkdown(focusedLastLog.text)}
-						</p>
+				{#if focusedRecentLogs.length > 0}
+					<div class="focus-recent-logs">
+						<span class="focus-log-label">RECENT LOGS</span>
+						{#each focusedRecentLogs as log (log.id)}
+							<div class="focus-last-log">
+								<span class="focus-log-time">{relativeTime(log.createdAt)}</span>
+								<span class="focus-log-text">{log.text}</span>
+							</div>
+						{/each}
 					</div>
+					<button type="button" class="focus-view-logs" onclick={() => openDetail(focusedTodo.id)}>VIEW ALL LOGS &rsaquo;</button>
 				{/if}
 
 				<div class="focus-bottom">
-					<div class="focus-session">
-						<span class="focus-session-label">SESSION</span>
+					<div class="focus-session" class:paused={focus?.sessionPaused}>
+						<span class="focus-session-label">{focus?.sessionPaused ? 'PAUSED' : 'SESSION'}</span>
 						<span class="focus-elapsed"
 							>{formatElapsed(sessionElapsed)}</span
 						>
@@ -722,6 +855,12 @@
 									class="pomo-action pomo-stop"
 									onclick={pomoStop}>STOP</button
 								>
+								<button
+									class="pomo-dismiss"
+									onclick={pomoDismiss}
+									aria-label="Dismiss pomodoro"
+									title="Dismiss pomodoro">✕</button
+								>
 								<div class="pomo-dots">
 									{#each Array(4) as _, i}
 										<span
@@ -753,193 +892,263 @@
 					<input type="hidden" name="id" value={focusedTodo.id} />
 					<textarea
 						name="text"
-						rows="3"
+						rows="1"
 						placeholder="What did you just do? (supports markdown)"
 						required
+						onkeydown={(e: KeyboardEvent) => {
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								(e.target as HTMLTextAreaElement).form?.requestSubmit();
+							}
+						}}
 					></textarea>
 					<button type="submit">LOG</button>
 				</form>
 			</section>
 		{/if}
 
-		<section class="create-section" data-label="NEW TASK">
-			<form
-				method="POST"
-				action="?/create"
-				class="create-form"
-				use:enhance={() => {
-					return async ({ update }) => {
-						await update();
-						deadlineChoice = "none";
-						customDeadline = "";
-						createProjectId = "";
-					};
-				}}
-			>
-				<div class="create-top">
-					<input
-						type="text"
-						name="title"
-						placeholder="What needs to be done?"
-						autocomplete="off"
-						required
-					/>
-					<button type="submit">ADD</button>
-				</div>
-				<div class="create-extras">
-					<textarea
-						name="detail"
-						placeholder="Details (optional)"
-						rows="2"
-					></textarea>
-					<div class="deadline-row">
-						<span class="deadline-label">DEADLINE:</span>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={deadlineChoice === "none"}
-							onclick={() => (deadlineChoice = "none")}
-							>NONE</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={deadlineChoice === "today"}
-							onclick={() => (deadlineChoice = "today")}
-							>TODAY</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={deadlineChoice === "tomorrow"}
-							onclick={() => (deadlineChoice = "tomorrow")}
-							>TOMORROW</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={deadlineChoice === "custom"}
-							onclick={() => (deadlineChoice = "custom")}
-							>CUSTOM</button
-						>
-						{#if deadlineChoice === "custom"}
-							<input
-								type="datetime-local"
-								class="deadline-datetime"
-								bind:value={customDeadline}
-							/>
-						{/if}
+		<section class="create-section" data-label={editingTodo ? `EDITING: ${editingTodo.title}` : "NEW TASK"}>
+			{#if editingTodo}
+				<form
+					method="POST"
+					action="?/update"
+					class="create-form"
+					use:enhance={() => {
+						return async ({ update }) => {
+							await update({ reset: false });
+							closeEditForm();
+						};
+					}}
+				>
+					<input type="hidden" name="id" value={editingTodo.id} />
+					<div class="create-top">
+						<input
+							type="text"
+							value={editingTodo.title}
+							disabled
+						/>
+						<button type="submit" class="btn-save">SAVE</button>
+						<button type="button" class="btn-edit-close" onclick={closeEditForm}>✕</button>
 					</div>
+					<div class="create-extras">
+						<textarea
+							name="detail"
+							placeholder="Details (optional)"
+							rows="2"
+							bind:value={editDetail}
+						></textarea>
+						<div class="deadline-row">
+							<span class="deadline-label">DEADLINE:</span>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={editDeadlineChoice === "none"}
+								onclick={() => (editDeadlineChoice = "none")}
+								>NONE</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={editDeadlineChoice === "today"}
+								onclick={() => (editDeadlineChoice = "today")}
+								>TODAY</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={editDeadlineChoice === "tomorrow"}
+								onclick={() => (editDeadlineChoice = "tomorrow")}
+								>TOMORROW</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={editDeadlineChoice === "custom"}
+								onclick={() => (editDeadlineChoice = "custom")}
+								>CUSTOM</button
+							>
+							{#if editDeadlineChoice === "custom"}
+								<input
+									type="datetime-local"
+									class="deadline-datetime"
+									bind:value={editCustomDeadline}
+								/>
+							{/if}
+						</div>
+						<input
+							type="hidden"
+							name="deadline"
+							value={editDeadlineValue}
+						/>
+						<input
+							type="hidden"
+							name="timezoneOffset"
+							value={String(timezoneOffset)}
+						/>
+					</div>
+				</form>
+				<div class="create-extras edit-project-row">
 					<div class="project-row">
 						<span class="project-label">PROJECT:</span>
-						<select
-							class="project-select"
-							name="projectId"
-							bind:value={createProjectId}
+						<form
+							class="project-inline-form"
+							method="POST"
+							action="?/setTaskProject"
+							use:enhance={() => {
+								return async ({ update }) => {
+									await update({ reset: false });
+								};
+							}}
 						>
-							<option value="">INBOX</option>
-							{#each data.projects as p (p.id)}
-								<option value={p.id}
-									>{p.name.toUpperCase()}</option
+							<input type="hidden" name="todoId" value={editingTodo.id} />
+							<select name="projectId" class="project-select">
+								<option value="" selected={!editingTodo.projectId}
+									>INBOX</option
 								>
-							{/each}
-						</select>
+								{#each data.projects as p (p.id)}
+									<option
+										value={p.id}
+										selected={editingTodo.projectId === p.id}
+										>{p.name.toUpperCase()}</option
+									>
+								{/each}
+							</select>
+							<button type="submit">SET</button>
+						</form>
 					</div>
-					<input
-						type="hidden"
-						name="deadline"
-						value={createDeadlineValue}
-					/>
-					<input
-						type="hidden"
-						name="timezoneOffset"
-						value={String(timezoneOffset)}
-					/>
 				</div>
-			</form>
+			{:else}
+				<form
+					method="POST"
+					action="?/create"
+					class="create-form"
+					use:enhance={() => {
+						return async ({ update }) => {
+							await update();
+							deadlineChoice = "none";
+							customDeadline = "";
+							createProjectId = "";
+						};
+					}}
+				>
+					<div class="create-top">
+						<input
+							type="text"
+							name="title"
+							placeholder="What needs to be done?"
+							autocomplete="off"
+							required
+							onfocus={() => createExpanded = true}
+						/>
+						<button type="submit">ADD</button>
+						{#if focus && !showCreateExtras}
+							<button type="button" class="create-expand-btn" onclick={() => createExpanded = true} aria-label="Show more options" title="More options">&#9660;</button>
+						{/if}
+					</div>
+					{#if showCreateExtras}
+					<div class="create-extras">
+						<textarea
+							name="detail"
+							placeholder="Details (optional)"
+							rows="2"
+						></textarea>
+						<div class="deadline-row">
+							<span class="deadline-label">DEADLINE:</span>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={deadlineChoice === "none"}
+								onclick={() => (deadlineChoice = "none")}
+								>NONE</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={deadlineChoice === "today"}
+								onclick={() => (deadlineChoice = "today")}
+								>TODAY</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={deadlineChoice === "tomorrow"}
+								onclick={() => (deadlineChoice = "tomorrow")}
+								>TOMORROW</button
+							>
+							<button
+								type="button"
+								class="deadline-opt"
+								class:selected={deadlineChoice === "custom"}
+								onclick={() => (deadlineChoice = "custom")}
+								>CUSTOM</button
+							>
+							{#if deadlineChoice === "custom"}
+								<input
+									type="datetime-local"
+									class="deadline-datetime"
+									bind:value={customDeadline}
+								/>
+							{/if}
+						</div>
+						<div class="project-row">
+							<span class="project-label">PROJECT:</span>
+							<select
+								class="project-select"
+								name="projectId"
+								bind:value={createProjectId}
+							>
+								<option value="">INBOX</option>
+								{#each data.projects as p (p.id)}
+									<option value={p.id}
+										>{p.name.toUpperCase()}</option
+									>
+								{/each}
+							</select>
+						</div>
+						<input
+							type="hidden"
+							name="deadline"
+							value={createDeadlineValue}
+						/>
+						<input
+							type="hidden"
+							name="timezoneOffset"
+							value={String(timezoneOffset)}
+						/>
+					</div>
+					{/if}
+				</form>
+			{/if}
 		</section>
 
 		<section class="task-section" data-label="TASK QUEUE">
 			{#if data.todos.length > 0}
-				<ul class="todo-list">
-					{#each data.todos as todo (todo.id)}
-						{@const taskPomSummary = pomodoroSummary(todo.id)}
-						{@const lastLog = todo.logs?.length
-							? todo.logs[todo.logs.length - 1]
-							: null}
-						{@const totalFocus = todo.totalFocusMs ?? 0}
-						<li
-							class="todo-item"
-							class:done={todo.done}
-							class:active={focus?.activeTaskId === todo.id}
-						>
-							<div class="todo-row">
-								<form
-									method="POST"
-									action="?/toggle"
-									class="toggle-form"
-									use:enhance
-								>
-									<input
-										type="hidden"
-										name="id"
-										value={todo.id}
-									/>
-									<button
-										type="submit"
-										class="toggle-btn"
-										class:checked={todo.done}
-									>
-										{todo.done ? "✓" : ""}
-									</button>
-								</form>
-
-								{#if todo.deadline && !todo.done && isOverdue(todo.deadline)}
-									<span class="status-tag urgent"
-										>(OVERDUE)</span
-									>
-								{:else if focus?.activeTaskId === todo.id}
-									<span class="status-tag active"
-										>[FOCUSED]</span
-									>
-								{/if}
-
-								<button
-									class="todo-title"
-									onclick={() => {
-										if (!todo.done) focusOnTask(todo.id);
+				{#each todoGroups() as group (group.name)}
+					<div class="task-group">
+						<div class="task-group-header">{group.name}</div>
+						<ul class="todo-list">
+							{#each group.todos as todo (todo.id)}
+								{@const taskPomSummary = pomodoroSummary(todo.id)}
+								{@const lastLog = todo.logs?.length
+									? todo.logs[todo.logs.length - 1]
+									: null}
+								{@const totalFocus = todo.totalFocusMs ?? 0}
+								<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+							<li
+									class="todo-item"
+									class:done={todo.done}
+									class:active={focus?.activeTaskId === todo.id}
+									onclick={(e: MouseEvent) => {
+										if ((e.target as HTMLElement)?.closest?.('button, a, select, form')) return;
 										openDetail(todo.id);
-									}}>{todo.title}</button
+									}}
 								>
-
-								<span class="task-project-pill"
-									>{todo.projectId
-										? getProjectName(
-												todo.projectId,
-											).toUpperCase()
-										: "INBOX"}</span
-								>
-
-								{#if todo.deadline}
-									<span
-										class="deadline-badge"
-										class:overdue={!todo.done &&
-											isOverdue(todo.deadline)}
-									>
-										{formatDeadline(todo.deadline)}
-									</span>
-								{/if}
-
-								<div class="todo-actions">
-									{#if !todo.done && focus?.activeTaskId === todo.id}
-										<button onclick={() => unfocusTask()}
-											>UNFOCUS</button
-										>
-									{/if}
-									{#if todo.done}
+									<div class="todo-row">
 										<form
 											method="POST"
-											action="?/archive"
+											action="?/toggle"
+											class="toggle-form"
 											use:enhance
 										>
 											<input
@@ -947,63 +1156,132 @@
 												name="id"
 												value={todo.id}
 											/>
-											<button type="submit"
-												>ARCHIVE</button
+											<button
+												type="submit"
+												class="toggle-btn"
+												class:checked={todo.done}
 											>
+												{todo.done ? "✓" : ""}
+											</button>
 										</form>
-									{/if}
-									<form
-										method="POST"
-										action="?/delete"
-										use:enhance
-									>
-										<input
-											type="hidden"
-											name="id"
-											value={todo.id}
-										/>
-										<button
-											type="submit"
-											class="btn-danger"
-											onclick={() => {
-												if (
-													focus?.activeTaskId ===
-													todo.id
-												)
-													unfocusTask();
-											}}>DEL</button
-										>
-									</form>
-								</div>
-							</div>
 
-							{#if taskPomSummary || lastLog || totalFocus > 0}
-								<div class="task-meta">
-									{#if totalFocus > 0}
-										<span class="task-meta-item"
-											>{formatDuration(totalFocus)} focused</span
+										{#if todo.deadline && !todo.done && isOverdue(todo.deadline)}
+											<span class="status-tag urgent"
+												>(OVERDUE)</span
+											>
+										{:else if focus?.activeTaskId === todo.id}
+											<span class="status-tag active"
+												>[FOCUSED]</span
+											>
+										{/if}
+
+										<button
+											class="todo-title"
+											onclick={() => {
+												if (!todo.done) {
+													if (focus?.activeTaskId === todo.id) {
+														document.querySelector('.hero-focus')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+													} else {
+														focusOnTask(todo.id);
+													}
+												}
+												openDetail(todo.id);
+											}}>{todo.title}</button
 										>
+
+										{#if todo.deadline}
+											<span
+												class="deadline-badge"
+												class:overdue={!todo.done &&
+													isOverdue(todo.deadline)}
+											>
+												{formatDeadline(todo.deadline)}
+											</span>
+										{/if}
+
+										<div class="todo-actions">
+											{#if !todo.done}
+												<button
+													class="btn-edit"
+													onclick={() => toggleEditForm(todo.id)}
+													>{editingTaskId === todo.id ? 'CLOSE' : 'EDIT'}</button
+												>
+											{/if}
+											{#if !todo.done && focus?.activeTaskId === todo.id}
+												<button onclick={() => unfocusTask()}
+													>PAUSE</button
+												>
+											{/if}
+											{#if todo.done}
+												<form
+													method="POST"
+													action="?/archive"
+													use:enhance
+												>
+													<input
+														type="hidden"
+														name="id"
+														value={todo.id}
+													/>
+													<button type="submit"
+														>ARCHIVE</button
+													>
+												</form>
+											{/if}
+											<form
+												method="POST"
+												action="?/delete"
+												use:enhance
+											>
+												<input
+													type="hidden"
+													name="id"
+													value={todo.id}
+												/>
+												<button
+													type="submit"
+													class="btn-danger"
+													onclick={() => {
+														if (
+															focus?.activeTaskId ===
+															todo.id
+														)
+															unfocusTask();
+													}}>DEL</button
+												>
+											</form>
+										</div>
+									</div>
+
+									{#if taskPomSummary || lastLog || totalFocus > 0}
+										<div class="task-meta">
+											{#if totalFocus > 0}
+												<span class="task-meta-item"
+													>{formatDuration(totalFocus)} focused</span
+												>
+											{/if}
+											{#if taskPomSummary}
+												<span class="task-meta-item"
+													>{taskPomSummary}</span
+												>
+											{/if}
+											{#if lastLog}
+												<span class="task-meta-item"
+													>{lastLog.text.slice(0, 40)}{lastLog
+														.text.length > 40
+														? "..."
+														: ""} · {relativeTime(
+														lastLog.createdAt,
+													)}</span
+												>
+											{/if}
+										</div>
 									{/if}
-									{#if taskPomSummary}
-										<span class="task-meta-item"
-											>{taskPomSummary}</span
-										>
-									{/if}
-									{#if lastLog}
-										<span class="task-meta-item"
-											>{lastLog.text.slice(0, 40)}{lastLog
-												.text.length > 40
-												? "..."
-												: ""} · {relativeTime(
-												lastLog.createdAt,
-											)}</span
-										>
-									{/if}
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/each}
 			{:else}
 				<div class="empty">No tasks yet. Add one above.</div>
 			{/if}
@@ -1031,107 +1309,12 @@
 				<button class="detail-close" onclick={closeDetail}>✕</button>
 			</div>
 
-			<div class="detail-section">
-				<div class="detail-section-title">DETAILS</div>
-				<form
-					class="detail-form"
-					method="POST"
-					action="?/update"
-					use:enhance={() => {
-						return async ({ update }) => {
-							await update({ reset: false });
-						};
-					}}
-				>
-					<input type="hidden" name="id" value={detailTodo.id} />
-					<textarea
-						name="detail"
-						rows="3"
-						placeholder="Add details..."
-						bind:value={editDetail}
-					></textarea>
-					<div class="deadline-row">
-						<span class="deadline-label">DEADLINE:</span>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={editDeadlineChoice === "none"}
-							onclick={() => (editDeadlineChoice = "none")}
-							>NONE</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={editDeadlineChoice === "today"}
-							onclick={() => (editDeadlineChoice = "today")}
-							>TODAY</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={editDeadlineChoice === "tomorrow"}
-							onclick={() => (editDeadlineChoice = "tomorrow")}
-							>TOMORROW</button
-						>
-						<button
-							type="button"
-							class="deadline-opt"
-							class:selected={editDeadlineChoice === "custom"}
-							onclick={() => (editDeadlineChoice = "custom")}
-							>CUSTOM</button
-						>
-						{#if editDeadlineChoice === "custom"}
-							<input
-								type="datetime-local"
-								class="deadline-datetime"
-								bind:value={editCustomDeadline}
-							/>
-						{/if}
-					</div>
-					<input
-						type="hidden"
-						name="deadline"
-						value={editDeadlineValue}
-					/>
-					<input
-						type="hidden"
-						name="timezoneOffset"
-						value={String(timezoneOffset)}
-					/>
-					<button type="submit" class="btn-save">SAVE</button>
-				</form>
-			</div>
-
-			<div class="detail-section">
-				<div class="detail-section-title">PROJECT</div>
-				<form
-					class="detail-form"
-					method="POST"
-					action="?/setTaskProject"
-					use:enhance={() => {
-						return async ({ update }) => {
-							await update({ reset: false });
-						};
-					}}
-				>
-					<input type="hidden" name="todoId" value={detailTodo.id} />
-					<div class="detail-form-row">
-						<select name="projectId" class="project-select">
-							<option value="" selected={!detailTodo.projectId}
-								>INBOX</option
-							>
-							{#each data.projects as p (p.id)}
-								<option
-									value={p.id}
-									selected={detailTodo.projectId === p.id}
-									>{p.name.toUpperCase()}</option
-								>
-							{/each}
-						</select>
-						<button type="submit">SET</button>
-					</div>
-				</form>
-			</div>
+			{#if detailTodo.detail}
+				<div class="detail-section">
+					<div class="detail-section-title">DETAILS</div>
+					<p class="detail-text-readonly">{detailTodo.detail}</p>
+				</div>
+			{/if}
 
 			{#if detailSessions.length > 0 || (detailTodo.totalFocusMs ?? 0) > 0}
 				<div class="detail-section">

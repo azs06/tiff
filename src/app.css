@@ -19,12 +19,12 @@
 	--border-heavy: 3px solid var(--border-color);
 	--font:         'JetBrains Mono', monospace;
 	--font-display: var(--font);
-	--hero-bg:      #0E0E0E;
-	--hero-text:    #E0E0E0;
+	--hero-bg:      #F4F4EF;
+	--hero-text:    #111111;
 	--sidebar-w:    304px;
 	--detail-w:     340px;
 	--content-pad:  2rem;
-	--layout-max-w: 1260px;
+	--layout-max-w: 1400px;
 }
 
 /* ═══ THEME: PAPER ═══ */
@@ -228,16 +228,24 @@ body::after {
 }
 
 .left-sidebar-arrow-icon {
-	width: 0.52rem;
-	height: 0.52rem;
-	border-right: 2px solid currentColor;
-	border-bottom: 2px solid currentColor;
-	transform: rotate(135deg);
-	transition: transform 0.2s ease;
+	width: 0.75rem;
+	height: 0.55rem;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
 }
 
-.left-sidebar-arrow.collapsed .left-sidebar-arrow-icon {
-	transform: rotate(-45deg);
+.left-sidebar-arrow-icon::before,
+.left-sidebar-arrow-icon::after {
+	content: '';
+	display: block;
+	height: 1.5px;
+	background: currentColor;
+	border-radius: 1px;
+}
+
+.left-sidebar-arrow-icon::before {
+	box-shadow: 0 0.22rem 0 currentColor;
 }
 
 .left-sidebar-arrow:hover {
@@ -670,12 +678,16 @@ body::after {
 .detail-panel {
 	background: var(--bg-panel);
 	border-left: 1px solid var(--border-color);
-	display: flex;
+	display: none;
 	flex-direction: column;
 	position: sticky;
 	top: 0;
 	height: 100vh;
 	overflow-y: auto;
+}
+
+.detail-panel.open {
+	display: flex;
 }
 
 .detail-panel::-webkit-scrollbar {
@@ -987,6 +999,68 @@ body::after {
 	min-width: 0;
 }
 
+/* ═══ EDIT CLOSE + PROJECT INLINE ═══ */
+
+.btn-edit-close {
+	width: 36px;
+	min-width: 36px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.85rem;
+	border: 2px solid var(--border-color);
+	background: var(--bg-surface);
+	color: var(--text-muted);
+}
+
+.btn-edit-close:hover {
+	background: var(--danger);
+	color: #fff;
+	border-color: var(--danger);
+}
+
+.edit-project-row {
+	padding-top: 0;
+	margin-top: -0.35rem;
+	border-top: 1px solid var(--border-color);
+	padding-top: 0.65rem;
+}
+
+.project-inline-form {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.project-inline-form button {
+	font-size: 0.62rem;
+	padding: 0.35rem 0.7rem;
+}
+
+.btn-edit {
+	font-size: 0.62rem;
+	padding: 0.25rem 0.55rem;
+	color: var(--text-dim);
+	border: 1px solid transparent;
+	background: transparent;
+}
+
+.btn-edit:hover {
+	color: var(--text-primary);
+	border-color: var(--border-color);
+	background: var(--bg-elevated);
+}
+
+
+.detail-text-readonly {
+	font-size: 0.75rem;
+	color: var(--text-primary);
+	white-space: pre-wrap;
+	word-break: break-word;
+	line-height: 1.5;
+}
+
 /* Task card metadata */
 .task-meta {
 	display: flex;
@@ -1007,16 +1081,6 @@ body::after {
 	color: var(--border-color);
 }
 
-.task-project-pill {
-	font-size: 0.55rem;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	padding: 0.2rem 0.45rem;
-	border: 1px solid var(--border-color);
-	color: var(--text-muted);
-	white-space: nowrap;
-	flex-shrink: 0;
-}
 
 /* ═══ MAIN CONTENT ═══ */
 
@@ -1109,16 +1173,32 @@ body::after {
 }
 
 .toggle-detail-btn-icon {
-	width: 0.52rem;
-	height: 0.52rem;
-	border-right: 2px solid currentColor;
-	border-bottom: 2px solid currentColor;
-	transform: rotate(135deg);
-	transition: transform 0.2s ease;
+	width: 0.85rem;
+	height: 0.6rem;
+	border: 1.5px solid currentColor;
+	border-radius: 1px;
+	position: relative;
+	display: block;
 }
 
-.toggle-detail-btn.open .toggle-detail-btn-icon {
-	transform: rotate(-45deg);
+.toggle-detail-btn-icon::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 40%;
+	border-left: 1.5px solid currentColor;
+}
+
+.toggle-detail-btn-icon::after {
+	content: '';
+	position: absolute;
+	top: 0.1rem;
+	left: calc(40% + 0.15rem);
+	right: 0.1rem;
+	height: 1px;
+	background: currentColor;
+	box-shadow: 0 0.13rem 0 currentColor, 0 0.26rem 0 currentColor;
 }
 
 .toggle-detail-btn:hover {
@@ -1242,7 +1322,7 @@ body::after {
 .hero-focus {
 	background: var(--hero-bg);
 	color: var(--hero-text);
-	padding: 1.5rem 2rem 1.25rem;
+	padding: 1.8rem 2rem 1.5rem;
 	border-bottom: 1px solid var(--border-color);
 	position: relative;
 }
@@ -1263,80 +1343,152 @@ body::after {
 .focus-top-bar {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	margin-bottom: 0.75rem;
+	margin-bottom: 0.5rem;
 }
 
 .focus-project {
-	font-size: 0.6rem;
+	font-size: 0.52rem;
 	font-weight: 700;
-	letter-spacing: 0.2em;
+	letter-spacing: 0.18em;
 	color: var(--accent);
+	padding: 0.2rem 0.55rem;
+	border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+	text-transform: uppercase;
 }
 
 .hero-toggle-btn {
-	padding: 0.3rem 0.7rem;
+	width: 22px;
+	height: 22px;
+	min-width: 22px;
+	padding: 0;
 	display: flex;
 	align-items: center;
-	gap: 0.45rem;
-	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
+	justify-content: center;
+	border: 2px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
 	background: transparent;
 	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
 	cursor: pointer;
 	transition: all 0.15s ease;
-	margin-left: auto;
-}
-
-.hero-toggle-btn::before {
-	content: '';
-	width: 14px;
-	height: 14px;
-	min-width: 14px;
-	border: 2px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
-	display: block;
-	transition: all 0.15s ease;
-}
-
-.hero-toggle-label {
-	font-size: 0.6rem;
-	font-weight: 700;
-	letter-spacing: 0.1em;
+	flex-shrink: 0;
 }
 
 .hero-toggle-btn:hover {
 	border-color: var(--accent);
-	color: var(--accent);
-}
-
-.hero-toggle-btn:hover::before {
-	border-color: var(--accent);
 	background: var(--accent);
-	box-shadow: inset 0 0 0 1px var(--hero-bg);
+	box-shadow: inset 0 0 0 2px var(--hero-bg);
 }
 
-.hero-close {
-	background: none;
-	border: 1px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
-	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
-	font-size: 0.6rem;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	padding: 0.3rem 0.7rem;
+.focus-title-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	margin-bottom: 0.85rem;
+}
+
+/* ── Edit icon (pencil) ── */
+
+.hero-edit-icon {
+	width: 30px;
+	height: 30px;
+	min-width: 30px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 45%, transparent);
 	cursor: pointer;
+	flex-shrink: 0;
 	transition: all 0.15s ease;
 }
 
-.hero-close:hover {
+.hero-edit-icon:hover {
 	color: var(--hero-text);
 	border-color: var(--hero-text);
 	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
 }
 
-.focus-nav-row {
+.hero-edit-icon.active {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hero-edit-icon.active:hover {
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* ── Pause icon ── */
+
+.hero-pause-icon {
+	width: 30px;
+	height: 30px;
+	min-width: 30px;
+	padding: 0;
 	display: flex;
 	align-items: center;
-	gap: 0.75rem;
-	margin-bottom: 0.5rem;
+	justify-content: center;
+	font-size: 0.85rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 45%, transparent);
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: all 0.15s ease;
+}
+
+.hero-pause-icon:hover {
+	color: var(--hero-text);
+	border-color: var(--hero-text);
+	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
+}
+
+.hero-pause-icon.paused {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hero-pause-icon.paused:hover {
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* ── Stop icon ── */
+
+.hero-stop-icon {
+	width: 30px;
+	height: 30px;
+	min-width: 30px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.7rem;
+	border: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--hero-text) 45%, transparent);
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: all 0.15s ease;
+}
+
+.hero-stop-icon:hover {
+	color: var(--danger);
+	border-color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+/* ── Session paused state ── */
+
+.focus-session.paused .focus-session-label {
+	color: var(--accent);
+}
+
+.focus-session.paused .focus-elapsed {
+	opacity: 0.6;
 }
 
 .focus-nav-btn {
@@ -1363,7 +1515,7 @@ body::after {
 
 .focus-title {
 	flex: 1;
-	font-size: clamp(1.2rem, 3vw, 1.8rem);
+	font-size: clamp(0.96rem, 2.4vw, 1.44rem);
 	font-weight: 800;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
@@ -1374,37 +1526,68 @@ body::after {
 .focus-detail {
 	font-size: 0.8rem;
 	color: color-mix(in srgb, var(--hero-text) 70%, transparent);
-	margin-bottom: 0.75rem;
+	margin-bottom: 1rem;
 	white-space: pre-wrap;
 	line-height: 1.5;
 	max-height: 4.5em;
 	overflow: hidden;
 }
 
+.focus-recent-logs {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	margin-bottom: 0.2rem;
+}
+
+.focus-recent-logs .focus-log-label {
+	margin-bottom: 0.1rem;
+}
+
 .focus-last-log {
-	padding: 0.6rem 0.75rem;
-	border: 1px solid color-mix(in srgb, var(--hero-text) 15%, transparent);
-	margin-bottom: 0.75rem;
-	font-size: 0.75rem;
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	font-size: 0.7rem;
 }
 
 .focus-log-label {
-	font-size: 0.55rem;
+	font-size: 0.5rem;
 	font-weight: 700;
 	letter-spacing: 0.15em;
 	color: color-mix(in srgb, var(--hero-text) 50%, transparent);
-	margin-right: 0.5rem;
+	flex-shrink: 0;
 }
 
 .focus-log-time {
-	font-size: 0.6rem;
+	font-size: 0.5rem;
 	color: color-mix(in srgb, var(--hero-text) 40%, transparent);
+	flex-shrink: 0;
 }
 
 .focus-log-text {
-	margin-top: 0.25rem;
-	color: color-mix(in srgb, var(--hero-text) 80%, transparent);
-	line-height: 1.4;
+	color: color-mix(in srgb, var(--hero-text) 70%, transparent);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.focus-view-logs {
+	background: none;
+	border: none;
+	color: color-mix(in srgb, var(--hero-text) 45%, transparent);
+	font-size: 0.5rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	cursor: pointer;
+	padding: 0;
+	margin-bottom: 1rem;
+	font-family: var(--font);
+}
+
+.focus-view-logs:hover {
+	color: var(--hero-text);
 }
 
 /* Markdown inside logs */
@@ -1440,7 +1623,7 @@ body::after {
 	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
-	margin-bottom: 0.75rem;
+	margin-bottom: 1.1rem;
 	flex-wrap: wrap;
 }
 
@@ -1542,6 +1725,20 @@ body::after {
 	border-color: var(--danger);
 }
 
+.pomo-dismiss {
+	font-size: 0.55rem;
+	padding: 0.15rem 0.35rem;
+	background: transparent;
+	border: none;
+	color: color-mix(in srgb, var(--hero-text) 35%, transparent);
+	cursor: pointer;
+	line-height: 1;
+}
+
+.pomo-dismiss:hover {
+	color: var(--hero-text);
+}
+
 .pomo-dots {
 	display: flex;
 	gap: 0.25rem;
@@ -1578,7 +1775,7 @@ body::after {
 	color: var(--hero-text);
 	outline: none;
 	resize: vertical;
-	min-height: 3.5rem;
+	min-height: 2rem;
 	line-height: 1.5;
 }
 
@@ -1693,6 +1890,12 @@ button:active:not(.todo-title) {
 	outline: none;
 }
 
+.create-top input[type='text']:disabled {
+	color: var(--text-primary);
+	opacity: 0.7;
+	cursor: default;
+}
+
 .create-top input[type='text']::placeholder {
 	color: var(--text-dim);
 	text-transform: uppercase;
@@ -1716,6 +1919,23 @@ button:active:not(.todo-title) {
 }
 
 .create-top button:hover {
+	background: var(--accent);
+	color: #111;
+	border-color: var(--accent);
+}
+
+.create-expand-btn {
+	border: 2px solid var(--border-color);
+	border-left: none;
+	padding: 0.8rem 0.6rem;
+	font-size: 0.6rem;
+	background: var(--bg-surface);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.create-expand-btn:hover {
 	background: var(--accent);
 	color: #111;
 	border-color: var(--accent);
@@ -1951,6 +2171,9 @@ button:active:not(.todo-title) {
 
 .todo-list {
 	list-style: none;
+}
+
+.task-group:last-child .todo-list {
 	padding-bottom: 4rem;
 }
 
@@ -1959,6 +2182,7 @@ button:active:not(.todo-title) {
 	border-bottom: 1px solid var(--border-color);
 	background: var(--bg-panel);
 	transition: background 0.12s;
+	cursor: pointer;
 }
 
 .todo-item:hover {
@@ -2159,6 +2383,19 @@ button:active:not(.todo-title) {
 
 /* ═══ ANIMATIONS ═══ */
 
+@keyframes edit-highlight {
+	0% {
+		box-shadow: inset 0 0 0 2px var(--accent);
+	}
+	100% {
+		box-shadow: inset 0 0 0 2px transparent;
+	}
+}
+
+.edit-highlight {
+	animation: edit-highlight 0.6s ease-out;
+}
+
 @keyframes flash {
 	0%,
 	49% {
@@ -2316,6 +2553,14 @@ button:active:not(.todo-title) {
 	border-radius: 0 4px 4px 0;
 }
 
+[data-theme="paper"] .create-expand-btn {
+	border-radius: 0 4px 4px 0;
+}
+
+[data-theme="paper"] .create-top button:has(+ .create-expand-btn) {
+	border-radius: 0;
+}
+
 [data-theme="paper"] .create-extras textarea,
 [data-theme="paper"] .todo-detail-panel textarea,
 [data-theme="paper"] .settings-input {
@@ -2406,12 +2651,24 @@ button:active:not(.todo-title) {
 	font-weight: 900;
 }
 
-/* Focus project label — serif italic */
+/* Focus project label — serif italic, rounded pill */
 [data-theme="paper"] .focus-project {
 	font-family: var(--font-display);
 	font-style: italic;
 	font-weight: 700;
 	letter-spacing: 0.15em;
+	border-radius: 12px;
+}
+
+/* Hero icon buttons — rounded */
+[data-theme="paper"] .hero-edit-icon,
+[data-theme="paper"] .hero-pause-icon,
+[data-theme="paper"] .hero-stop-icon {
+	border-radius: 6px;
+}
+
+[data-theme="paper"] .hero-toggle-btn {
+	border-radius: 6px;
 }
 
 /* Pomodoro pill — rounded */
@@ -2456,6 +2713,11 @@ button:active:not(.todo-title) {
 	font-size: 0.7rem;
 	font-weight: 900;
 	letter-spacing: 0.08em;
+}
+
+/* Edit close button — rounded */
+[data-theme="paper"] .btn-edit-close {
+	border-radius: 4px;
 }
 
 /* Tagline — serif */
@@ -2663,10 +2925,9 @@ button:active:not(.todo-title) {
 	border-color: var(--border-color);
 }
 
-/* Focus last log — soft */
-[data-theme="nothing"] .focus-last-log {
-	border-color: var(--border-color);
-	border-radius: 6px;
+/* Focus view logs link — soft */
+[data-theme="nothing"] .focus-view-logs {
+	border-radius: 4px;
 }
 
 /* Project select — rounded */
@@ -2703,6 +2964,10 @@ button:active:not(.todo-title) {
 [data-theme="nothing"] .toggle-btn.checked {
 	box-shadow: none;
 	background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+[data-theme="nothing"] .create-expand-btn {
+	border-radius: 0 6px 6px 0;
 }
 
 /* Form inputs — subtle blue border on focus */
@@ -2802,6 +3067,57 @@ button:active:not(.todo-title) {
 [data-theme="nothing"] .resource-url:hover {
 	text-shadow: none;
 	color: var(--accent);
+}
+
+/* Edit close button — rounded */
+[data-theme="nothing"] .btn-edit-close {
+	border-radius: 6px;
+}
+
+/* Hero icon buttons — clean */
+[data-theme="nothing"] .hero-edit-icon,
+[data-theme="nothing"] .hero-pause-icon,
+[data-theme="nothing"] .hero-stop-icon {
+	border-color: var(--border-color);
+	color: var(--text-muted);
+	border-radius: 6px;
+}
+
+[data-theme="nothing"] .hero-edit-icon:hover,
+[data-theme="nothing"] .hero-pause-icon:hover {
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-color: var(--border-color);
+}
+
+[data-theme="nothing"] .hero-stop-icon:hover {
+	background: var(--bg-surface);
+	color: var(--danger);
+	border-color: var(--danger);
+}
+
+[data-theme="nothing"] .hero-edit-icon.active {
+	color: var(--text-primary);
+	border-color: var(--text-primary);
+	background: var(--bg-surface);
+}
+
+[data-theme="nothing"] .hero-toggle-btn {
+	border-color: var(--border-color);
+	border-radius: 6px;
+}
+
+[data-theme="nothing"] .hero-toggle-btn:hover {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+	box-shadow: none;
+}
+
+[data-theme="nothing"] .focus-project {
+	border-color: var(--border-color);
+	background: var(--bg-surface);
+	color: var(--text-muted);
+	border-radius: 12px;
 }
 
 /* Calendar today — subtle accent border */
@@ -2973,11 +3289,11 @@ button:active:not(.todo-title) {
 	/* ── Hero focus card ── */
 
 	.hero-focus {
-		padding: 1.25rem 1rem 1rem;
+		padding: 1.5rem 1rem 1.2rem;
 	}
 
 	.focus-title {
-		font-size: clamp(1rem, 5vw, 1.4rem);
+		font-size: clamp(0.8rem, 4vw, 1.12rem);
 	}
 
 	.focus-nav-btn {
@@ -2991,8 +3307,7 @@ button:active:not(.todo-title) {
 	}
 
 	.focus-last-log {
-		font-size: 0.68rem;
-		padding: 0.5rem 0.6rem;
+		font-size: 0.62rem;
 	}
 
 	.focus-bottom {
@@ -3019,7 +3334,7 @@ button:active:not(.todo-title) {
 	}
 
 	.focus-log-form textarea {
-		min-height: 2.5rem;
+		min-height: 1.8rem;
 		font-size: 0.72rem;
 	}
 
@@ -3028,20 +3343,27 @@ button:active:not(.todo-title) {
 		padding: 0.35rem 0.9rem;
 	}
 
-	.hero-toggle-btn,
-	.hero-close {
-		font-size: 0.55rem;
-		padding: 0.25rem 0.55rem;
+	.hero-toggle-btn {
+		width: 19px;
+		height: 19px;
+		min-width: 19px;
 	}
 
-	.hero-toggle-label {
-		font-size: 0.55rem;
+	.hero-edit-icon,
+	.hero-pause-icon,
+	.hero-stop-icon {
+		width: 26px;
+		height: 26px;
+		min-width: 26px;
+		font-size: 0.8rem;
 	}
 
 	.focus-top-bar {
-		margin-bottom: 0.5rem;
+		margin-bottom: 0.35rem;
+	}
+
+	.focus-title-row {
 		gap: 0.4rem;
-		flex-wrap: wrap;
 	}
 
 	/* ── Create form ── */
@@ -3062,6 +3384,11 @@ button:active:not(.todo-title) {
 	.create-top button {
 		padding: 0.65rem 1rem;
 		font-size: 0.7rem;
+	}
+
+	.create-expand-btn {
+		padding: 0.65rem 0.5rem;
+		font-size: 0.5rem;
 	}
 
 	.deadline-row {
@@ -3138,6 +3465,17 @@ button:active:not(.todo-title) {
 		padding: 0.75rem var(--content-pad) 0.35rem;
 	}
 
+	.btn-edit-close {
+		width: 32px;
+		min-width: 32px;
+		font-size: 0.75rem;
+	}
+
+	.btn-edit {
+		font-size: 0.55rem;
+		padding: 0.2rem 0.4rem;
+	}
+
 	/* ── Empty state ── */
 
 	.empty {
@@ -3148,6 +3486,7 @@ button:active:not(.todo-title) {
 	/* ── Detail panel: full-width drawer ── */
 
 	.detail-panel {
+		display: flex;
 		position: fixed;
 		top: 0;
 		right: 0;
@@ -3195,11 +3534,11 @@ button:active:not(.todo-title) {
 	}
 
 	.hero-focus {
-		padding: 1rem 0.75rem 0.85rem;
+		padding: 1.2rem 0.75rem 1.02rem;
 	}
 
 	.focus-title {
-		font-size: clamp(0.9rem, 5vw, 1.2rem);
+		font-size: clamp(0.72rem, 4vw, 0.96rem);
 	}
 
 	.focus-elapsed {
@@ -3214,6 +3553,11 @@ button:active:not(.todo-title) {
 	.create-top button {
 		padding: 0.55rem 0.75rem;
 		font-size: 0.62rem;
+	}
+
+	.create-expand-btn {
+		padding: 0.55rem 0.45rem;
+		font-size: 0.45rem;
 	}
 
 	.todo-row {
