@@ -1087,6 +1087,7 @@ body::after {
 .main-content {
 	background: var(--bg-panel);
 	min-height: 100vh;
+	min-width: 0;
 	position: relative;
 }
 
@@ -1313,7 +1314,7 @@ body::after {
 	text-transform: uppercase;
 	letter-spacing: 0.25em;
 	color: var(--accent-dark);
-	padding: 1.25rem var(--content-pad) 0.3rem;
+	padding: 0.6rem var(--content-pad) 0.3rem;
 	font-variant: small-caps;
 }
 
@@ -1533,22 +1534,19 @@ body::after {
 	overflow: hidden;
 }
 
-.focus-recent-logs {
+.focus-history-row {
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: 0.25rem;
+	font-size: 0.7rem;
 	margin-bottom: 0.2rem;
 }
 
-.focus-recent-logs .focus-log-label {
-	margin-bottom: 0.1rem;
-}
-
-.focus-last-log {
+.focus-history-line {
 	display: flex;
 	align-items: baseline;
 	gap: 0.5rem;
-	font-size: 0.7rem;
+	overflow: hidden;
 }
 
 .focus-log-label {
@@ -1863,7 +1861,7 @@ button:active:not(.todo-title) {
 /* ═══ CREATE FORM ═══ */
 
 .create-section {
-	padding: var(--content-pad);
+	padding: 0.75rem var(--content-pad) var(--content-pad);
 	border-bottom: 1px solid var(--border-color);
 }
 
@@ -2049,6 +2047,13 @@ button:active:not(.todo-title) {
 /* ═══ TASK GROUPS ═══ */
 
 .task-group-header {
+	/* reset button */
+	background: none;
+	border: none;
+	width: 100%;
+	text-align: left;
+	cursor: pointer;
+	/* visual styles */
 	font-size: 0.55rem;
 	font-weight: 700;
 	text-transform: uppercase;
@@ -2057,6 +2062,27 @@ button:active:not(.todo-title) {
 	padding: 1rem var(--content-pad) 0.4rem;
 	border-bottom: 1px solid var(--border-color);
 	background: var(--bg-surface);
+	font-family: var(--font);
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.group-chevron {
+	display: inline-block;
+	transition: transform 0.15s ease;
+	transform: rotate(90deg);
+	font-size: 0.65rem;
+}
+
+.group-chevron.collapsed {
+	transform: rotate(0deg);
+}
+
+.group-count {
+	color: var(--text-dim);
+	font-weight: 400;
+	margin-left: auto;
 }
 
 /* ═══ PROJECT SIDEBAR ═══ */
@@ -2705,6 +2731,10 @@ button:active:not(.todo-title) {
 	letter-spacing: 0.08em;
 }
 
+[data-theme="paper"] .group-chevron {
+	font-style: normal;
+}
+
 /* Section labels — serif italic with decorative style */
 [data-theme="paper"] [data-label]::before {
 	font-family: var(--font-display);
@@ -3282,11 +3312,15 @@ button:active:not(.todo-title) {
 	/* ── Section labels ── */
 
 	[data-label]::before {
-		padding: 1rem var(--content-pad) 0.25rem;
+		padding: 0.5rem var(--content-pad) 0.25rem;
 		font-size: 0.5rem;
 	}
 
 	/* ── Hero focus card ── */
+
+	.focus-history-row {
+		font-size: 0.62rem;
+	}
 
 	.hero-focus {
 		padding: 1.5rem 1rem 1.2rem;
@@ -3304,10 +3338,6 @@ button:active:not(.todo-title) {
 
 	.focus-detail {
 		font-size: 0.72rem;
-	}
-
-	.focus-last-log {
-		font-size: 0.62rem;
 	}
 
 	.focus-bottom {
@@ -3369,7 +3399,7 @@ button:active:not(.todo-title) {
 	/* ── Create form ── */
 
 	.create-section {
-		padding: 0.85rem var(--content-pad);
+		padding: 0.5rem var(--content-pad) 0.85rem;
 	}
 
 	.create-top input[type='text'] {

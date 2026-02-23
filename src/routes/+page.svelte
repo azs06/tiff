@@ -394,6 +394,17 @@
 			: null,
 	);
 
+	let collapsedGroups: Set<string> = $state(new Set());
+
+	function toggleGroup(name: string) {
+		if (collapsedGroups.has(name)) {
+			collapsedGroups.delete(name);
+		} else {
+			collapsedGroups.add(name);
+		}
+		collapsedGroups = new Set(collapsedGroups);
+	}
+
 	let createExpanded = $state(false);
 	let showCreateExtras = $derived(!focus || !!editingTodo || createExpanded);
 
@@ -575,10 +586,16 @@
 		);
 	}
 
-	let focusedRecentLogs = $derived(
+	let focusedLastLog = $derived(
 		focusedTodo?.logs?.length
-			? focusedTodo.logs.slice(-3).reverse()
-			: [],
+			? focusedTodo.logs[focusedTodo.logs.length - 1]
+			: null,
+	);
+
+	let focusedLastSession = $derived(
+		focusedTodo
+			? getTaskSessions(focusedTodo.id).at(-1) ?? null
+			: null,
 	);
 
 	let todoGroups = $derived(() => {
@@ -589,11 +606,14 @@
 			if (!map.has(key)) map.set(key, []);
 			map.get(key)!.push(todo);
 		}
+		// Sort: incomplete tasks first, preserving order within each bucket
+		const sortTodos = (todos: typeof data.todos) =>
+			todos.slice().sort((a, b) => Number(a.done) - Number(b.done));
 		// "INBOX" (no project) first, then named projects
 		const inbox = map.get('');
-		if (inbox) groups.push({ name: 'INBOX', todos: inbox });
+		if (inbox) groups.push({ name: 'INBOX', todos: sortTodos(inbox) });
 		for (const [key, todos] of map) {
-			if (key !== '') groups.push({ name: getProjectName(key).toUpperCase(), todos });
+			if (key !== '') groups.push({ name: getProjectName(key).toUpperCase(), todos: sortTodos(todos) });
 		}
 		return groups;
 	});
@@ -792,17 +812,24 @@
 					<p class="focus-detail">{focusedTodo.detail}</p>
 				{/if}
 
-				{#if focusedRecentLogs.length > 0}
-					<div class="focus-recent-logs">
-						<span class="focus-log-label">RECENT LOGS</span>
-						{#each focusedRecentLogs as log (log.id)}
-							<div class="focus-last-log">
-								<span class="focus-log-time">{relativeTime(log.createdAt)}</span>
-								<span class="focus-log-text">{log.text}</span>
+				{#if focusedLastLog || focusedLastSession}
+					<div class="focus-history-row">
+						{#if focusedLastLog}
+							<div class="focus-history-line">
+								<span class="focus-log-label">LOG</span>
+								<span class="focus-log-time">{relativeTime(focusedLastLog.createdAt)}</span>
+								<span class="focus-log-text">{focusedLastLog.text}</span>
 							</div>
-						{/each}
+						{/if}
+						{#if focusedLastSession}
+							<div class="focus-history-line">
+								<span class="focus-log-label">SESSION</span>
+								<span class="focus-log-time">{formatSessionDate(focusedLastSession.startedAt)}</span>
+								<span class="focus-log-text">{formatDuration(sessionDuration(focusedLastSession))}</span>
+							</div>
+						{/if}
 					</div>
-					<button type="button" class="focus-view-logs" onclick={() => openDetail(focusedTodo.id)}>VIEW ALL LOGS &rsaquo;</button>
+					<button type="button" class="focus-view-logs" onclick={() => openDetail(focusedTodo.id)}>VIEW DETAILS &rsaquo;</button>
 				{/if}
 
 				<div class="focus-bottom">
@@ -1125,7 +1152,15 @@
 			{#if data.todos.length > 0}
 				{#each todoGroups() as group (group.name)}
 					<div class="task-group">
-						<div class="task-group-header">{group.name}</div>
+						<button
+							class="task-group-header"
+							onclick={() => toggleGroup(group.name)}
+						>
+							<span class="group-chevron" class:collapsed={collapsedGroups.has(group.name)}>▸</span>
+							{group.name}
+							<span class="group-count">{group.todos.length}</span>
+						</button>
+						{#if !collapsedGroups.has(group.name)}
 						<ul class="todo-list">
 							{#each group.todos as todo (todo.id)}
 								{@const taskPomSummary = pomodoroSummary(todo.id)}
@@ -1280,6 +1315,7 @@
 								</li>
 							{/each}
 						</ul>
+						{/if}
 					</div>
 				{/each}
 			{:else}
