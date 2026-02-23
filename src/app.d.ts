@@ -7,6 +7,8 @@ declare global {
 			env: {
 				TIFF_KV: KVNamespace;
 				TIFF_ATTACHMENTS: R2Bucket;
+				CF_ACCESS_AUD?: string;
+				CF_ACCESS_TEAM_DOMAIN?: string;
 			};
 		}
 	}

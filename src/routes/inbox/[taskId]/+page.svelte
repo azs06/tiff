@@ -40,10 +40,6 @@
 		return m > 0 ? `${h}h ${m}m` : `${h}h`;
 	}
 
-	function getTaskSessions(taskId: string): FocusSession[] {
-		return data.sessions.filter((session) => session.taskId === taskId && session.endedAt);
-	}
-
 	function sessionDuration(session: FocusSession): number {
 		if (!session.endedAt) return 0;
 		return session.endedAt - session.startedAt;
@@ -87,6 +83,35 @@
 			.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
 			.replace(/\n/g, '<br>');
 	}
+
+	function toDayKey(timestamp: number): string {
+		const d = new Date(timestamp);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+
+	let detailSessions = $derived(
+		todo ? data.sessions.filter((s) => s.taskId === todo.id && s.endedAt) : []
+	);
+
+	let groupedByDay = $derived.by(() => {
+		const map = new Map<string, { dayKey: string; label: string; totalMs: number; segments: { durationMs: number; endReason: string }[] }>();
+		for (const s of detailSessions) {
+			const key = toDayKey(s.startedAt);
+			let entry = map.get(key);
+			if (!entry) {
+				entry = { dayKey: key, label: formatSessionDate(s.startedAt), totalMs: 0, segments: [] };
+				map.set(key, entry);
+			}
+			const dur = sessionDuration(s);
+			entry.totalMs += dur;
+			entry.segments.push({ durationMs: dur, endReason: s.endReason ?? 'manual' });
+		}
+		return Array.from(map.values()).sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+	});
+
+	let maxDayMs = $derived(
+		groupedByDay.reduce((max, day) => Math.max(max, day.totalMs), 0)
+	);
 </script>
 
 <main class="main-content view-main">
@@ -98,7 +123,6 @@
 		{#if !todo}
 			<div class="empty">Task not found in inbox. <a href="/inbox">Back to inbox</a>.</div>
 		{:else}
-			{@const detailSessions = getTaskSessions(todo.id)}
 			<article class="project-card inbox-task-detail-card" class:done={todo.done}>
 				<div class="project-card-header project-detail-top">
 					<div class="project-title-block">
@@ -148,15 +172,33 @@
 							<strong>{formatDuration(todo.totalFocusMs ?? 0)}</strong>
 							across {detailSessions.length} session{detailSessions.length !== 1 ? 's' : ''}
 						</div>
-						{#if detailSessions.length > 0}
-							<div class="session-list">
-								{#each detailSessions.slice().reverse() as session (session.id)}
-									<div class="session-entry">
-										<span class="session-date">{formatSessionDate(session.startedAt)}</span>
-										<span class="session-duration">{formatDuration(sessionDuration(session))}</span>
-										<span class="session-reason">{session.endReason ?? ''}</span>
+						{#if groupedByDay.length > 0}
+							<div class="session-bars">
+								{#each groupedByDay as day (day.dayKey)}
+									<div class="session-bar-row">
+										<span class="session-bar-date">{day.label}</span>
+										<div class="session-bar-track">
+											<div
+												class="session-bar-fill"
+												style="width: {maxDayMs > 0 ? (day.totalMs / maxDayMs) * 100 : 0}%"
+											>
+												{#each day.segments as seg}
+													<div
+														class="session-bar-seg session-bar-seg--{seg.endReason}"
+														style="width: {day.totalMs > 0 ? (seg.durationMs / day.totalMs) * 100 : 0}%"
+														title="{formatDuration(seg.durationMs)} ({seg.endReason})"
+													></div>
+												{/each}
+											</div>
+										</div>
+										<span class="session-bar-dur">{formatDuration(day.totalMs)}</span>
 									</div>
 								{/each}
+							</div>
+							<div class="session-bar-legend">
+								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--done"></span> DONE</span>
+								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--switch"></span> SWITCH</span>
+								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--manual"></span> MANUAL</span>
 							</div>
 						{/if}
 					{:else}

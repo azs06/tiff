@@ -1,42 +1,43 @@
-# sv
+# TIFF
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit app deployed to Cloudflare Workers with KV + R2 storage.
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
+## Local development
 
 ```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv create --template minimal --types ts --no-install .
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+`src/hooks.server.ts` bypasses Cloudflare Access in local/dev runtime and uses `dev@localhost`.
 
-To create a production version of your app:
+## Deploy
 
 ```sh
 npm run build
+npx wrangler deploy
 ```
 
-You can preview the production build with `npm run preview`.
+## Cloudflare Zero Trust Access
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Production requests are protected with Cloudflare Access JWT validation.
+
+1. In Cloudflare Zero Trust, create an Access application for your deployed worker hostname.
+2. Add at least one `Allow` policy for your identity users/groups.
+3. Copy:
+   - Team domain, e.g. `https://your-team.cloudflareaccess.com`
+   - Application audience (`AUD`) from the Access app.
+4. Set both values as Worker secrets:
+
+```sh
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
+npx wrangler secret put CF_ACCESS_AUD
+```
+
+5. Redeploy:
+
+```sh
+npm run deploy
+```
+
+If either secret is missing, the app returns `500`. If a request does not include a valid Access JWT, the app returns `401/403`.
