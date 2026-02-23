@@ -128,11 +128,18 @@ export const sharedActions: Actions = {
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
 
+		const titleValue = data.get('title');
+		const title = typeof titleValue === 'string' ? titleValue.trim() : undefined;
+		if (typeof titleValue === 'string' && !title) {
+			return fail(400, { error: 'Title is required' });
+		}
+
 		const detail = data.get('detail')?.toString().trim() ?? undefined;
 		const tzOffset = Number(data.get('timezoneOffset') || 0);
 		const deadlineRaw = data.get('deadline')?.toString().trim();
 		const deadline = deadlineRaw ? resolveDeadline(deadlineRaw, tzOffset) : null;
 		await updateTodo(kv, locals.userEmail, id, {
+			...(title !== undefined && { title }),
 			...(detail !== undefined && { detail }),
 			...(deadline !== undefined && { deadline })
 		});
