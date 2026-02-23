@@ -54,6 +54,7 @@
 		</div>
 		<nav class="left-nav" aria-label="Main navigation">
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/')} href="/">HOME</a>
+			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/inbox')} href="/inbox">INBOX</a>
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/projects')} href="/projects">PROJECTS</a>
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/settings')} href="/settings">SETTINGS</a>
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/archive')} href="/archive">ARCHIVE</a>

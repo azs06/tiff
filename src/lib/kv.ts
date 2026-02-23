@@ -45,11 +45,16 @@ export async function updateTodo(
 	kv: KVNamespace,
 	email: string,
 	id: string,
-	patch: { detail?: string; deadline?: number | null }
+	patch: { title?: string; detail?: string; deadline?: number | null }
 ): Promise<void> {
 	const todos = await getTodos(kv, email);
 	const todo = todos.find((t) => t.id === id);
 	if (!todo) return;
+	if (patch.title !== undefined) {
+		if (patch.title) {
+			todo.title = patch.title;
+		}
+	}
 	if (patch.detail !== undefined) {
 		if (patch.detail) {
 			todo.detail = patch.detail;
