@@ -23,10 +23,16 @@ import {
 	addProjectResource,
 	deleteProjectResource,
 	addProjectAttachment,
-	deleteProjectAttachment
+	deleteProjectAttachment,
+	getGitHubInfo,
+	saveGitHubInfo,
+	deleteGitHubInfo,
+	archiveProject,
+	unarchiveProject
 } from '$lib/kv';
 import type { FocusState, UserSettings, Theme } from '$lib/types';
 import { THEMES } from '$lib/types';
+import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
 
 function resolveDeadline(value: string | undefined, timezoneOffset: number): number | undefined {
 	if (!value) return undefined;
@@ -203,6 +209,22 @@ export const sharedActions: Actions = {
 		await unarchiveTodo(kv, locals.userEmail, id);
 	},
 
+	archiveProject: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		if (!id) return fail(400);
+		await archiveProject(kv, locals.userEmail, id);
+	},
+
+	unarchiveProject: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const id = data.get('id')?.toString();
+		if (!id) return fail(400);
+		await unarchiveProject(kv, locals.userEmail, id);
+	},
+
 	saveSettings: async ({ request, locals, platform }) => {
 		const kv = platform!.env.TIFF_KV;
 		const data = await request.formData();
@@ -254,12 +276,48 @@ export const sharedActions: Actions = {
 		if (!name) return fail(400);
 
 		const detail = data.get('detail')?.toString().trim() || undefined;
+		const repoRaw = data.get('repo')?.toString().trim();
+		let githubRepo: string | undefined;
+
+		if (repoRaw) {
+			const parsed = parseGitHubRepo(repoRaw);
+			if (!parsed) return fail(400, { error: 'Invalid GitHub repo format' });
+			githubRepo = `${parsed.owner}/${parsed.repo}`;
+		}
+
+		const projectId = crypto.randomUUID();
+		let readmeDetail: string | undefined;
+
+		if (githubRepo && platform?.env.GITHUB_TOKEN) {
+			const parsed = parseGitHubRepo(githubRepo)!;
+			try {
+				const [info, readmeResult] = await Promise.all([
+					fetchRepoInfo(parsed.owner, parsed.repo, {
+						token: platform.env.GITHUB_TOKEN
+					}),
+					fetchReadme(parsed.owner, parsed.repo, {
+						token: platform.env.GITHUB_TOKEN
+					})
+				]);
+				if (readmeResult) {
+					info.readmeContent = readmeResult.content;
+					info.readmeFetchedAt = Date.now();
+					if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
+					if (!detail) readmeDetail = readmeResult.content;
+				}
+				await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+			} catch {
+				// Non-fatal: cache will be populated on next page load
+			}
+		}
+
 		const projects = await getProjects(kv, locals.userEmail);
 		projects.push({
-			id: crypto.randomUUID(),
+			id: projectId,
 			name,
 			createdAt: Date.now(),
-			...(detail ? { detail } : {})
+			...(detail || readmeDetail ? { detail: detail ?? readmeDetail } : {}),
+			...(githubRepo ? { githubRepo } : {})
 		});
 		await saveProjects(kv, locals.userEmail, projects);
 	},
@@ -295,6 +353,7 @@ export const sharedActions: Actions = {
 		const keys = (deletedProject?.attachments ?? []).map((a) => a.key).filter((k): k is string => Boolean(k));
 		if (keys.length > 0) await r2.delete(keys);
 		await saveProjects(kv, locals.userEmail, projects.filter((p) => p.id !== id));
+		await deleteGitHubInfo(kv, locals.userEmail, id);
 
 		const todos = await getTodos(kv, locals.userEmail);
 		let changed = false;
@@ -331,6 +390,131 @@ export const sharedActions: Actions = {
 			delete todo.projectId;
 		}
 		await saveTodos(kv, locals.userEmail, todos);
+	},
+
+	linkGithub: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const token = platform?.env.GITHUB_TOKEN;
+		if (!token) return fail(400, { error: 'GitHub integration not configured' });
+
+		const data = await request.formData();
+		const projectId = data.get('projectId')?.toString();
+		const repo = data.get('repo')?.toString().trim();
+		if (!projectId || !repo) return fail(400);
+
+		const parsed = parseGitHubRepo(repo);
+		if (!parsed) return fail(400, { error: 'Invalid repo format. Use owner/repo or a GitHub URL.' });
+
+		const projects = await getProjects(kv, locals.userEmail);
+		const project = projects.find((p) => p.id === projectId);
+		if (!project) return fail(400, { error: 'Project not found' });
+
+		try {
+			const [info, readmeResult] = await Promise.all([
+				fetchRepoInfo(parsed.owner, parsed.repo, { token }),
+				fetchReadme(parsed.owner, parsed.repo, { token })
+			]);
+			project.githubRepo = `${parsed.owner}/${parsed.repo}`;
+
+			if (readmeResult) {
+				info.readmeContent = readmeResult.content;
+				info.readmeFetchedAt = Date.now();
+				if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
+				if (!project.detail) project.detail = readmeResult.content;
+			}
+
+			await saveProjects(kv, locals.userEmail, projects);
+			await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+		} catch (e) {
+			if (e instanceof GitHubError) {
+				if (e.code === 'not_found') return fail(400, { error: 'Repository not found' });
+				if (e.code === 'rate_limited') return fail(429, { error: 'GitHub rate limit exceeded' });
+			}
+			return fail(500, { error: 'Failed to fetch repository info' });
+		}
+	},
+
+	syncReadme: async ({ request, locals, platform }) => {
+		const token = platform?.env.GITHUB_TOKEN;
+		if (!token) return fail(400, { error: 'GitHub integration not configured' });
+
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const projectId = data.get('projectId')?.toString();
+		if (!projectId) return fail(400);
+
+		const projects = await getProjects(kv, locals.userEmail);
+		const project = projects.find((p) => p.id === projectId);
+		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
+
+		const parsed = parseGitHubRepo(project.githubRepo);
+		if (!parsed) return fail(400, { error: 'Invalid repo format' });
+
+		const readmeResult = await fetchReadme(parsed.owner, parsed.repo, { token });
+		if (!readmeResult) return fail(404, { error: 'README not found in repository' });
+
+		// Write README to project detail
+		project.detail = readmeResult.content;
+		await saveProjects(kv, locals.userEmail, projects);
+
+		// Update cached GitHub info with README content
+		const existing = await getGitHubInfo(kv, locals.userEmail, projectId);
+		if (existing) {
+			existing.readmeContent = readmeResult.content;
+			existing.readmeFetchedAt = Date.now();
+			if (readmeResult.updatedAt) existing.readmeUpdatedAt = readmeResult.updatedAt;
+			await saveGitHubInfo(kv, locals.userEmail, projectId, existing);
+		}
+	},
+
+	unlinkGithub: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const data = await request.formData();
+		const projectId = data.get('projectId')?.toString();
+		if (!projectId) return fail(400);
+
+		const projects = await getProjects(kv, locals.userEmail);
+		const project = projects.find((p) => p.id === projectId);
+		if (!project) return fail(400);
+
+		delete project.githubRepo;
+		await saveProjects(kv, locals.userEmail, projects);
+		await deleteGitHubInfo(kv, locals.userEmail, projectId);
+	},
+
+	syncGithub: async ({ request, locals, platform }) => {
+		const kv = platform!.env.TIFF_KV;
+		const token = platform?.env.GITHUB_TOKEN;
+		if (!token) return fail(400, { error: 'GitHub integration not configured' });
+
+		const data = await request.formData();
+		const projectId = data.get('projectId')?.toString();
+		if (!projectId) return fail(400);
+
+		const projects = await getProjects(kv, locals.userEmail);
+		const project = projects.find((p) => p.id === projectId);
+		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
+
+		const parsed = parseGitHubRepo(project.githubRepo);
+		if (!parsed) return fail(400, { error: 'Invalid repo format' });
+
+		try {
+			const [info, readmeResult] = await Promise.all([
+				fetchRepoInfo(parsed.owner, parsed.repo, { token }),
+				fetchReadme(parsed.owner, parsed.repo, { token })
+			]);
+			if (readmeResult) {
+				info.readmeContent = readmeResult.content;
+				info.readmeFetchedAt = Date.now();
+				if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
+			}
+			await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+		} catch (e) {
+			if (e instanceof GitHubError) {
+				if (e.code === 'rate_limited') return fail(429, { error: 'GitHub rate limit exceeded' });
+			}
+			return fail(500, { error: 'Failed to sync repository info' });
+		}
 	},
 
 	addProjectResource: async ({ request, locals, platform }) => {

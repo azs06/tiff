@@ -84,6 +84,8 @@
 			.replace(/\n/g, '<br>');
 	}
 
+	const sessionLabels: Record<string, string> = { done: 'focused', switch: 'switch', manual: 'idle' };
+
 	function toDayKey(timestamp: number): string {
 		const d = new Date(timestamp);
 		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -186,7 +188,7 @@
 													<div
 														class="session-bar-seg session-bar-seg--{seg.endReason}"
 														style="width: {day.totalMs > 0 ? (seg.durationMs / day.totalMs) * 100 : 0}%"
-														title="{formatDuration(seg.durationMs)} ({seg.endReason})"
+														title="{formatDuration(seg.durationMs)} ({sessionLabels[seg.endReason] ?? seg.endReason})"
 													></div>
 												{/each}
 											</div>
@@ -196,9 +198,9 @@
 								{/each}
 							</div>
 							<div class="session-bar-legend">
-								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--done"></span> DONE</span>
+								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--done"></span> FOCUSED</span>
 								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--switch"></span> SWITCH</span>
-								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--manual"></span> MANUAL</span>
+								<span class="session-bar-legend-item"><span class="session-bar-swatch session-bar-seg--manual"></span> IDLE</span>
 							</div>
 						{/if}
 					{:else}

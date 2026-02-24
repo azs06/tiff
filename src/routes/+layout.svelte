@@ -58,7 +58,7 @@
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/projects')} href="/projects">PROJECTS</a>
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/settings')} href="/settings">SETTINGS</a>
 			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/archive')} href="/archive">ARCHIVE</a>
-			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/calendar')} href="/calendar">CALENDAR</a>
+			<a class="sidebar-tab" class:active={isActive(page.url.pathname, '/calendar')} href="/calendar">ACTIVITY</a>
 		</nav>
 	</aside>
 

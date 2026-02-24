@@ -42,6 +42,24 @@ export interface Project {
 	detail?: string;
 	resources?: Resource[];
 	attachments?: ProjectAttachment[];
+	githubRepo?: string;
+	archived?: boolean;
+	archivedAt?: number;
+}
+
+export interface GitHubRepoInfo {
+	fullName: string;
+	description: string | null;
+	defaultBranch: string;
+	lastPushedAt: string;
+	stars: number;
+	openIssueCount: number;
+	lastMergedPr: { number: number; title: string; mergedAt: string; url: string } | null;
+	fetchedAt: number;
+	error?: string;
+	readmeContent?: string;
+	readmeFetchedAt?: number;
+	readmeUpdatedAt?: string;
 }
 
 export interface FocusSession {

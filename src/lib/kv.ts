@@ -8,7 +8,8 @@ import type {
 	Project,
 	ProjectAttachment,
 	FocusState,
-	FocusSession
+	FocusSession,
+	GitHubRepoInfo
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
 
@@ -173,6 +174,9 @@ function normalizeProject(project: Project): Project {
 	if (project.detail) normalized.detail = project.detail;
 	if (project.resources && project.resources.length > 0) normalized.resources = project.resources;
 	if (project.attachments && project.attachments.length > 0) normalized.attachments = project.attachments;
+	if (project.githubRepo) normalized.githubRepo = project.githubRepo;
+	if (project.archived) normalized.archived = project.archived;
+	if (project.archivedAt) normalized.archivedAt = project.archivedAt;
 	return normalized;
 }
 
@@ -276,6 +280,26 @@ export async function deleteProjectAttachment(
 	return attachment;
 }
 
+export async function archiveProject(kv: KVNamespace, email: string, id: string): Promise<void> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === id);
+	if (project) {
+		project.archived = true;
+		project.archivedAt = Date.now();
+		await saveProjects(kv, email, projects);
+	}
+}
+
+export async function unarchiveProject(kv: KVNamespace, email: string, id: string): Promise<void> {
+	const projects = await getProjects(kv, email);
+	const project = projects.find((p) => p.id === id);
+	if (project) {
+		delete project.archived;
+		delete project.archivedAt;
+		await saveProjects(kv, email, projects);
+	}
+}
+
 // ── Focus state ──
 
 export async function getFocus(kv: KVNamespace, email: string): Promise<FocusState | null> {
@@ -333,4 +357,32 @@ export async function startSession(kv: KVNamespace, email: string, taskId: strin
 		startedAt: Date.now()
 	});
 	await saveSessions(kv, email, sessions);
+}
+
+// ── GitHub info cache ──
+
+export async function getGitHubInfo(
+	kv: KVNamespace,
+	email: string,
+	projectId: string
+): Promise<GitHubRepoInfo | null> {
+	const data = await kv.get(`github:${email}:${projectId}`, 'json');
+	return (data as GitHubRepoInfo) ?? null;
+}
+
+export async function saveGitHubInfo(
+	kv: KVNamespace,
+	email: string,
+	projectId: string,
+	info: GitHubRepoInfo
+): Promise<void> {
+	await kv.put(`github:${email}:${projectId}`, JSON.stringify(info), { expirationTtl: 900 });
+}
+
+export async function deleteGitHubInfo(
+	kv: KVNamespace,
+	email: string,
+	projectId: string
+): Promise<void> {
+	await kv.delete(`github:${email}:${projectId}`);
 }

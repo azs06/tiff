@@ -7,7 +7,7 @@
 
 <main class="main-content view-main">
 	<header class="main-header view-header">
-		<span class="tagline">Calendar</span>
+		<span class="tagline">Activity</span>
 	</header>
 
 	<section class="view-page" data-label="ACTIVITY">
