@@ -553,6 +553,8 @@
 		return session.endedAt - session.startedAt;
 	}
 
+	const sessionLabels: Record<string, string> = { done: 'focused', switch: 'switch', manual: 'idle' };
+
 	function formatSessionDate(timestamp: number): string {
 		const d = new Date(timestamp);
 		const now = new Date();
@@ -582,7 +584,11 @@
 	function getProjectName(projectId: string): string {
 		return (
 			data.projects.find((p: { id: string }) => p.id === projectId)
-				?.name ?? "Inbox"
+				?.name ??
+			data.archivedProjects.find(
+				(p: { id: string }) => p.id === projectId,
+			)?.name ??
+			"Inbox"
 		);
 	}
 
@@ -1383,7 +1389,7 @@
 										)}</span
 									>
 									<span class="session-reason"
-										>{session.endReason ?? ""}</span
+										>{sessionLabels[session.endReason ?? ''] ?? session.endReason ?? ""}</span
 									>
 								</div>
 							{/each}
