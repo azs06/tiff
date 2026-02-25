@@ -211,6 +211,12 @@
 		return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 	}
 
+	function scrollFocusedHeroIntoView() {
+		const hero = document.querySelector('.hero-focus');
+		if (!(hero instanceof HTMLElement)) return;
+		hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
 	function focusOnTask(taskId: string) {
 		setFocus({
 			activeTaskId: taskId,
@@ -219,7 +225,10 @@
 			pausedAt: undefined,
 			accumulatedPauseMs: 0,
 		});
-		tick().then(() => focusFormEl?.requestSubmit());
+		tick().then(() => {
+			focusFormEl?.requestSubmit();
+			scrollFocusedHeroIntoView();
+		});
 	}
 
 	function unfocusTask() {
@@ -1221,10 +1230,13 @@
 											onclick={() => {
 												if (!todo.done) {
 													if (focus?.activeTaskId === todo.id) {
-														document.querySelector('.hero-focus')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+														scrollFocusedHeroIntoView();
+														openDetail(todo.id);
 													} else {
+														closeDetail();
 														focusOnTask(todo.id);
 													}
+													return;
 												}
 												openDetail(todo.id);
 											}}>{todo.title}</button
