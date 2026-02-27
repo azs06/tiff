@@ -10,6 +10,7 @@
 	let workMin = $state(0);
 	let shortBreakMin = $state(0);
 	let longBreakMin = $state(0);
+	let batchUsers = $state(50);
 	let theme = $state<Theme>('signal');
 	let themeFormEl: HTMLFormElement;
 
@@ -29,6 +30,11 @@
 		theme = t;
 		await tick();
 		themeFormEl?.requestSubmit();
+	}
+
+	function formatDateTime(ms: number | null): string {
+		if (!ms) return 'N/A';
+		return new Date(ms).toLocaleString();
 	}
 </script>
 
@@ -84,6 +90,64 @@
 			{#each THEMES as t}
 				<button class="theme-btn" class:active={theme === t} onclick={() => setTheme(t)}>{t.toUpperCase()}</button>
 			{/each}
+		</div>
+	</section>
+
+	<section class="view-page" data-label="DATA MIGRATION">
+		<form
+			method="POST"
+			action="?/runBackfill"
+			class="detail-form settings-page-form"
+			use:enhance={() => {
+				return async ({ update }) => {
+					await update({ reset: false, invalidateAll: true });
+				};
+			}}
+		>
+			<input type="hidden" name="runId" value={data.migrationStatus.runId ?? ''} />
+			<input type="hidden" name="cursor" value={data.migrationStatus.cursor ?? ''} />
+			<div class="settings-field">
+				<label class="settings-label" for="batchUsers">Batch users</label>
+				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} />
+			</div>
+			<button type="submit" class="btn-save" disabled={!data.migrationStatus.enabled}>MIGRATE DATA</button>
+			{#if !data.migrationStatus.enabled}
+				<div class="settings-hint">Migration disabled. Configure D1, KV, and MIGRATION_ADMIN_TOKEN.</div>
+			{/if}
+		</form>
+
+		<div class="migration-status-card">
+			<div class="migration-status-row">
+				<span class="settings-label">Run status</span>
+				<span class="migration-status-value">{data.migrationStatus.status.toUpperCase()}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Run ID</span>
+				<span class="migration-status-value migration-run-id">{data.migrationStatus.runId ?? 'N/A'}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Processed users</span>
+				<span class="migration-status-value">{data.migrationStatus.processedUsers}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Mismatched users</span>
+				<span class="migration-status-value">{data.migrationStatus.mismatchedUsers}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Cursor</span>
+				<span class="migration-status-value">{data.migrationStatus.cursor ? 'PENDING' : 'COMPLETE'}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Started</span>
+				<span class="migration-status-value">{formatDateTime(data.migrationStatus.startedAt)}</span>
+			</div>
+			<div class="migration-status-row">
+				<span class="settings-label">Finished</span>
+				<span class="migration-status-value">{formatDateTime(data.migrationStatus.finishedAt)}</span>
+			</div>
+			{#if data.migrationStatus.notes}
+				<div class="settings-hint migration-notes">{data.migrationStatus.notes}</div>
+			{/if}
 		</div>
 	</section>
 </main>

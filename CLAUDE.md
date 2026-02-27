@@ -20,11 +20,17 @@ No test framework is configured.
 
 ## Architecture
 
-**Stack:** SvelteKit 2 + Svelte 5 (runes API) + TypeScript (strict) + Cloudflare Workers + Cloudflare KV
+**Stack:** SvelteKit 2 + Svelte 5 (runes API) + TypeScript (strict) + Cloudflare Workers + Cloudflare D1 + KV + R2
 
 **Auth:** Cloudflare Access JWT parsed in `src/hooks.server.ts`. In dev mode, hardcodes `dev@localhost`. Email is set on `event.locals.userEmail` for per-user data isolation.
 
-**Data layer (`src/lib/kv.ts`):** All persistence is Cloudflare KV via the `TIFF_KV` binding (declared in `wrangler.toml`, typed in `src/app.d.ts`). KV key schema:
+**Data layer (`src/lib/storage.ts`):** Persistence routes through a hybrid storage layer:
+- Primary relational storage in D1 (`TIFF_DB`)
+- Dual-write/canary controls via `STORAGE_READ_SOURCE`, `STORAGE_DUAL_WRITE`, `D1_CANARY_EMAILS`
+- KV (`TIFF_KV`) retained for GitHub cache and migration compatibility
+- R2 (`TIFF_ATTACHMENTS`) for binary attachments
+
+Legacy KV key schema (used for migration/cache):
 - `todos:{email}` — todo list (includes archived todos, task logs, resources, projectId, totalFocusMs inline)
 - `pomodoros:{email}` — completed pomodoro session logs
 - `focus:{email}` — active focus state (which task is focused + optional pomodoro sub-state)
