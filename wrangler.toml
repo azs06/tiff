@@ -24,5 +24,5 @@ preview_bucket_name = "tiff-attachments"
 [[d1_databases]]
 binding = "TIFF_DB"
 database_name = "tiff"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "7f14991c-0756-4f35-8124-ca64d9012a85"
 migrations_dir = "migrations"
