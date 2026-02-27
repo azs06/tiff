@@ -7,6 +7,11 @@ compatibility_flags = [ "nodejs_compat" ]
 directory = ".svelte-kit/cloudflare"
 binding = "ASSETS"
 
+[vars]
+STORAGE_READ_SOURCE = "kv"
+STORAGE_DUAL_WRITE = "false"
+D1_CANARY_EMAILS = ""
+
 [[kv_namespaces]]
 binding = "TIFF_KV"
 id = "e02956f78fa64637ad72b37805219bf1"
@@ -15,3 +20,9 @@ id = "e02956f78fa64637ad72b37805219bf1"
 binding = "TIFF_ATTACHMENTS"
 bucket_name = "tiff-attachments"
 preview_bucket_name = "tiff-attachments"
+
+[[d1_databases]]
+binding = "TIFF_DB"
+database_name = "tiff"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

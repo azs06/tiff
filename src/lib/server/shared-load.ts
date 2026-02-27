@@ -9,14 +9,20 @@ import {
 	saveFocus,
 	saveTimer,
 	getGitHubInfo,
-	saveGitHubInfo
-} from '$lib/kv';
+	saveGitHubInfo,
+	hasAnyStorage
+} from '$lib/storage';
 import { DEFAULT_SETTINGS, type FocusState, type GitHubRepoInfo } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, isCacheFresh } from '$lib/github';
+import { getLatestMigrationRun } from '$lib/server/migrations';
 
 export async function loadAppData(locals: App.Locals, platform: App.Platform | undefined) {
-	const kv = platform?.env.TIFF_KV;
-	if (!kv) {
+	const env = platform?.env;
+	const migrationEnabled = Boolean(env?.TIFF_DB && env?.TIFF_KV && env?.MIGRATION_ADMIN_TOKEN);
+	const latestMigrationRun =
+		env?.TIFF_DB && migrationEnabled ? await getLatestMigrationRun(env.TIFF_DB) : null;
+
+	if (!hasAnyStorage(env)) {
 		return {
 			todos: [],
 			archivedTodos: [],
@@ -27,26 +33,37 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 			archivedProjects: [],
 			sessions: [],
 			githubInfo: {} as Record<string, GitHubRepoInfo>,
-			hasGithubToken: false
+			hasGithubToken: false,
+			migrationStatus: {
+				enabled: migrationEnabled,
+				runId: null,
+				status: 'idle' as const,
+				startedAt: null,
+				finishedAt: null,
+				cursor: null,
+				processedUsers: 0,
+				mismatchedUsers: 0,
+				notes: null
+			}
 		};
 	}
 
 	const email = locals.userEmail;
-	const githubToken = platform?.env.GITHUB_TOKEN;
+	const githubToken = env?.GITHUB_TOKEN;
 
 	const [allTodos, serverFocus, settings, pomodoroLogs, projects, sessions] = await Promise.all([
-		getTodos(kv, email),
-		getFocus(kv, email),
-		getSettings(kv, email),
-		getPomodoroLogs(kv, email),
-		getProjects(kv, email),
-		getSessions(kv, email)
+		getTodos(env, email),
+		getFocus(env, email),
+		getSettings(env, email),
+		getPomodoroLogs(env, email),
+		getProjects(env, email),
+		getSessions(env, email)
 	]);
 
 	// Migration: convert old TimerState to FocusState
 	let focus = serverFocus;
 	if (!focus) {
-		const oldTimer = await getTimer(kv, email);
+		const oldTimer = await getTimer(env, email);
 		if (oldTimer) {
 			focus = {
 				activeTaskId: oldTimer.activeTaskId,
@@ -60,8 +77,8 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 					pausedRemaining: oldTimer.pausedRemaining
 				}
 			} satisfies FocusState;
-			await saveFocus(kv, email, focus);
-			await saveTimer(kv, email, null);
+			await saveFocus(env, email, focus);
+			await saveTimer(env, email, null);
 		}
 	}
 
@@ -71,7 +88,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 	if (linkedProjects.length > 0) {
 		const results = await Promise.all(
 			linkedProjects.map(async (p) => {
-				const cached = await getGitHubInfo(kv, email, p.id);
+				const cached = await getGitHubInfo(env, email, p.id);
 				if (cached && isCacheFresh(cached)) return { id: p.id, info: cached };
 
 				if (githubToken && p.githubRepo) {
@@ -86,7 +103,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 								if (cached.readmeFetchedAt) fresh.readmeFetchedAt = cached.readmeFetchedAt;
 								if (cached.readmeUpdatedAt) fresh.readmeUpdatedAt = cached.readmeUpdatedAt;
 							}
-							await saveGitHubInfo(kv, email, p.id, fresh);
+							await saveGitHubInfo(env, email, p.id, fresh);
 							return { id: p.id, info: fresh };
 						} catch {
 							if (cached) return { id: p.id, info: cached };
@@ -101,7 +118,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 								fetchedAt: Date.now(),
 								error: 'Failed to fetch repository info'
 							};
-							await saveGitHubInfo(kv, email, p.id, errorInfo);
+							await saveGitHubInfo(env, email, p.id, errorInfo);
 							return { id: p.id, info: errorInfo };
 						}
 					}
@@ -131,6 +148,17 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 		archivedProjects,
 		sessions,
 		githubInfo,
-		hasGithubToken: Boolean(githubToken)
+		hasGithubToken: Boolean(githubToken),
+		migrationStatus: {
+			enabled: migrationEnabled,
+			runId: latestMigrationRun?.runId ?? null,
+			status: latestMigrationRun?.status ?? ('idle' as const),
+			startedAt: latestMigrationRun?.startedAt ?? null,
+			finishedAt: latestMigrationRun?.finishedAt ?? null,
+			cursor: latestMigrationRun?.cursor ?? null,
+			processedUsers: latestMigrationRun?.processedUsers ?? 0,
+			mismatchedUsers: latestMigrationRun?.mismatchedUsers ?? 0,
+			notes: latestMigrationRun?.notes ?? null
+		}
 	};
 }

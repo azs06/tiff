@@ -1,17 +1,17 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getProjects } from '$lib/kv';
+import { getProjects } from '$lib/storage';
 
 function safeHeaderFilename(filename: string): string {
 	return filename.replace(/[\r\n"]/g, '').trim() || 'attachment';
 }
 
 export const GET: RequestHandler = async ({ locals, params, platform }) => {
-	const kv = platform?.env.TIFF_KV;
+	const env = platform?.env;
 	const r2 = platform?.env.TIFF_ATTACHMENTS;
-	if (!kv || !r2) throw error(500, 'Storage is not configured');
+	if (!r2) throw error(500, 'Storage is not configured');
 
-	const projects = await getProjects(kv, locals.userEmail);
+	const projects = await getProjects(env, locals.userEmail);
 	const project = projects.find((p) => p.id === params.projectId);
 	if (!project) throw error(404, 'Project not found');
 

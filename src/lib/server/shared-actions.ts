@@ -17,7 +17,6 @@ import {
 	getFocus,
 	saveFocus,
 	endActiveSession,
-	startSession,
 	saveTodos,
 	updateProject,
 	addProjectResource,
@@ -28,11 +27,23 @@ import {
 	saveGitHubInfo,
 	deleteGitHubInfo,
 	archiveProject,
-	unarchiveProject
-} from '$lib/kv';
+	unarchiveProject,
+	focusTaskTx,
+	unfocusTx,
+	toggleTodoAndHandleFocusTx,
+	deleteProjectCascadeTx
+} from '$lib/storage';
 import type { FocusState, UserSettings, Theme } from '$lib/types';
 import { THEMES } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
+import {
+	backfillUser,
+	collectUserEmailBatch,
+	decodeCursor,
+	ensureMigrationRun,
+	getLatestMigrationRun,
+	updateMigrationRunProgress
+} from '$lib/server/migrations';
 
 function resolveDeadline(value: string | undefined, timezoneOffset: number): number | undefined {
 	if (!value) return undefined;
@@ -69,7 +80,7 @@ function buildAttachmentUrl(projectId: string, attachmentId: string): string {
 
 export const sharedActions: Actions = {
 	create: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const title = data.get('title')?.toString().trim();
 		if (!title) return fail(400, { error: 'Title is required' });
@@ -81,55 +92,41 @@ export const sharedActions: Actions = {
 		let projectId: string | undefined;
 
 		if (projectIdRaw) {
-			const projects = await getProjects(kv, locals.userEmail);
+			const projects = await getProjects(env, locals.userEmail);
 			if (!projects.some((p) => p.id === projectIdRaw)) {
 				return fail(400, { error: 'Project not found' });
 			}
 			projectId = projectIdRaw;
 		}
 
-		await createTodo(kv, locals.userEmail, title, { detail, deadline, projectId });
+		await createTodo(env, locals.userEmail, title, { detail, deadline, projectId });
 	},
 
 	toggle: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-
-		const todos = await getTodos(kv, locals.userEmail);
-		const todo = todos.find((t) => t.id === id);
-		if (!todo) return;
-
-		todo.done = !todo.done;
-		await saveTodos(kv, locals.userEmail, todos);
-
-		if (todo.done) {
-			const focus = await getFocus(kv, locals.userEmail);
-			if (focus?.activeTaskId === id) {
-				await endActiveSession(kv, locals.userEmail, 'done');
-				await saveFocus(kv, locals.userEmail, null);
-			}
-		}
+		await toggleTodoAndHandleFocusTx(env, locals.userEmail, id);
 	},
 
 	delete: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
 
-		const focus = await getFocus(kv, locals.userEmail);
+		const focus = await getFocus(env, locals.userEmail);
 		if (focus?.activeTaskId === id) {
-			await endActiveSession(kv, locals.userEmail, 'manual');
-			await saveFocus(kv, locals.userEmail, null);
+			await endActiveSession(env, locals.userEmail, 'manual');
+			await saveFocus(env, locals.userEmail, null);
 		}
 
-		await deleteTodo(kv, locals.userEmail, id);
+		await deleteTodo(env, locals.userEmail, id);
 	},
 
 	update: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
@@ -144,7 +141,7 @@ export const sharedActions: Actions = {
 		const tzOffset = Number(data.get('timezoneOffset') || 0);
 		const deadlineRaw = data.get('deadline')?.toString().trim();
 		const deadline = deadlineRaw ? resolveDeadline(deadlineRaw, tzOffset) : null;
-		await updateTodo(kv, locals.userEmail, id, {
+		await updateTodo(env, locals.userEmail, id, {
 			...(title !== undefined && { title }),
 			...(detail !== undefined && { detail }),
 			...(deadline !== undefined && { deadline })
@@ -152,83 +149,76 @@ export const sharedActions: Actions = {
 	},
 
 	logPomodoro: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const taskId = data.get('taskId')?.toString();
 		const type = data.get('type')?.toString() as 'work' | 'short-break' | 'long-break';
 		const duration = Number(data.get('duration'));
 		if (!taskId || !type || !duration) return fail(400);
-		await logPomodoro(kv, locals.userEmail, { taskId, type, duration });
+		await logPomodoro(env, locals.userEmail, { taskId, type, duration });
 	},
 
 	syncFocus: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const raw = data.get('focus')?.toString();
 		if (!raw || raw === 'null') {
-			await saveFocus(kv, locals.userEmail, null);
+			await saveFocus(env, locals.userEmail, null);
 		} else {
 			const parsed = JSON.parse(raw) as FocusState;
-			await saveFocus(kv, locals.userEmail, parsed);
+			await saveFocus(env, locals.userEmail, parsed);
 		}
 	},
 
 	focusTask: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const taskId = data.get('taskId')?.toString();
 		if (!taskId) return fail(400);
-
-		await endActiveSession(kv, locals.userEmail, 'switch');
-		await startSession(kv, locals.userEmail, taskId);
-		await saveFocus(kv, locals.userEmail, {
-			activeTaskId: taskId,
-			focusedAt: Date.now()
-		});
+		await focusTaskTx(env, locals.userEmail, taskId);
 	},
 
 	unfocus: async ({ locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
-		await endActiveSession(kv, locals.userEmail, 'manual');
-		await saveFocus(kv, locals.userEmail, null);
+		const env = platform?.env;
+		await unfocusTx(env, locals.userEmail, 'manual');
 	},
 
 	archive: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-		await archiveTodo(kv, locals.userEmail, id);
+		await archiveTodo(env, locals.userEmail, id);
 	},
 
 	unarchive: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-		await unarchiveTodo(kv, locals.userEmail, id);
+		await unarchiveTodo(env, locals.userEmail, id);
 	},
 
 	archiveProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-		await archiveProject(kv, locals.userEmail, id);
+		await archiveProject(env, locals.userEmail, id);
 	},
 
 	unarchiveProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-		await unarchiveProject(kv, locals.userEmail, id);
+		await unarchiveProject(env, locals.userEmail, id);
 	},
 
 	saveSettings: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
-		const existing = await getSettings(kv, locals.userEmail);
+		const existing = await getSettings(env, locals.userEmail);
 		const clamp = (v: number) => Math.max(1, Math.min(120, v));
 		const workMin = clamp(Number(data.get('work') || 25));
 		const shortBreakMin = clamp(Number(data.get('shortBreak') || 5));
@@ -239,38 +229,104 @@ export const sharedActions: Actions = {
 			shortBreakMs: shortBreakMin * 60 * 1000,
 			longBreakMs: longBreakMin * 60 * 1000
 		};
-		await saveSettings(kv, locals.userEmail, settings);
+		await saveSettings(env, locals.userEmail, settings);
 	},
 
 	saveTheme: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const theme = data.get('theme')?.toString() as Theme;
 		if (!theme || !THEMES.includes(theme)) return fail(400);
-		const existing = await getSettings(kv, locals.userEmail);
-		await saveSettings(kv, locals.userEmail, { ...existing, theme });
+		const existing = await getSettings(env, locals.userEmail);
+		await saveSettings(env, locals.userEmail, { ...existing, theme });
+	},
+
+	runBackfill: async ({ request, platform }) => {
+		const env = platform?.env;
+		if (!env?.TIFF_KV || !env.TIFF_DB) {
+			return fail(500, { error: 'Both KV and D1 storage must be configured' });
+		}
+		if (!env.MIGRATION_ADMIN_TOKEN) {
+			return fail(403, { error: 'Migration is disabled (missing MIGRATION_ADMIN_TOKEN)' });
+		}
+
+		const data = await request.formData();
+		const requestedRunId = data.get('runId')?.toString().trim();
+		const requestedCursor = data.get('cursor')?.toString().trim() || null;
+		const batchUsers = Math.max(1, Math.min(500, Number(data.get('batchUsers') || 50)));
+
+		let runId = requestedRunId;
+		let cursor = requestedCursor;
+		if (!runId) {
+			const latest = await getLatestMigrationRun(env.TIFF_DB);
+			if (latest?.status === 'running') {
+				runId = latest.runId;
+				cursor = latest.cursor;
+			} else {
+				runId = crypto.randomUUID();
+			}
+		}
+
+		await ensureMigrationRun(env.TIFF_DB, runId);
+		const cursorState = decodeCursor(cursor);
+		const batch = await collectUserEmailBatch(env.TIFF_KV, cursorState, batchUsers);
+
+		const failed: Array<{ email: string; error: string }> = [];
+		let processed = 0;
+		for (const email of batch.emails) {
+			try {
+				await backfillUser(env.TIFF_KV, env.TIFF_DB, email);
+				processed += 1;
+			} catch (error) {
+				failed.push({
+					email,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+		}
+
+		await updateMigrationRunProgress(env.TIFF_DB, runId, {
+			status: failed.length > 0 ? 'failed' : batch.scanComplete ? 'completed' : 'running',
+			cursor: batch.nextCursor,
+			processedUsersDelta: processed,
+			notes: failed.length > 0 ? `Failed users: ${failed.map((entry) => entry.email).join(', ')}` : undefined,
+			finished: batch.scanComplete
+		});
+
+		if (failed.length > 0) {
+			return fail(500, {
+				error: `Backfill failed for ${failed.length} user(s)`,
+				failedUsers: failed.map((entry) => entry.email)
+			});
+		}
+
+		return {
+			runId,
+			processedUsers: processed,
+			scanComplete: batch.scanComplete
+		};
 	},
 
 	addLog: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		const text = data.get('text')?.toString().trim();
 		if (!id || !text) return fail(400);
-		await addTaskLog(kv, locals.userEmail, id, text);
+		await addTaskLog(env, locals.userEmail, id, text);
 	},
 
 	deleteLog: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		const logId = data.get('logId')?.toString();
 		if (!id || !logId) return fail(400);
-		await deleteTaskLog(kv, locals.userEmail, id, logId);
+		await deleteTaskLog(env, locals.userEmail, id, logId);
 	},
 
 	createProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const name = data.get('name')?.toString().trim();
 		if (!name) return fail(400);
@@ -305,13 +361,13 @@ export const sharedActions: Actions = {
 					if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
 					if (!detail) readmeDetail = readmeResult.content;
 				}
-				await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+				await saveGitHubInfo(env, locals.userEmail, projectId, info);
 			} catch {
 				// Non-fatal: cache will be populated on next page load
 			}
 		}
 
-		const projects = await getProjects(kv, locals.userEmail);
+		const projects = await getProjects(env, locals.userEmail);
 		projects.push({
 			id: projectId,
 			name,
@@ -319,11 +375,11 @@ export const sharedActions: Actions = {
 			...(detail || readmeDetail ? { detail: detail ?? readmeDetail } : {}),
 			...(githubRepo ? { githubRepo } : {})
 		});
-		await saveProjects(kv, locals.userEmail, projects);
+		await saveProjects(env, locals.userEmail, projects);
 	},
 
 	updateProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
@@ -338,49 +394,36 @@ export const sharedActions: Actions = {
 		}
 
 		if (Object.keys(patch).length === 0) return;
-		await updateProject(kv, locals.userEmail, id, patch);
+		await updateProject(env, locals.userEmail, id, patch);
 	},
 
 	deleteProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const r2 = platform!.env.TIFF_ATTACHMENTS;
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
 
-		const projects = await getProjects(kv, locals.userEmail);
-		const deletedProject = projects.find((p) => p.id === id);
-		const keys = (deletedProject?.attachments ?? []).map((a) => a.key).filter((k): k is string => Boolean(k));
+		const { attachmentKeys: keys } = await deleteProjectCascadeTx(env, locals.userEmail, id);
 		if (keys.length > 0) await r2.delete(keys);
-		await saveProjects(kv, locals.userEmail, projects.filter((p) => p.id !== id));
-		await deleteGitHubInfo(kv, locals.userEmail, id);
-
-		const todos = await getTodos(kv, locals.userEmail);
-		let changed = false;
-		for (const todo of todos) {
-			if (todo.projectId === id) {
-				delete todo.projectId;
-				changed = true;
-			}
-		}
-		if (changed) await saveTodos(kv, locals.userEmail, todos);
+		await deleteGitHubInfo(env, locals.userEmail, id);
 	},
 
 	setTaskProject: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const todoId = data.get('todoId')?.toString();
 		const projectId = data.get('projectId')?.toString().trim() || undefined;
 		if (!todoId) return fail(400);
 
 		if (projectId) {
-			const projects = await getProjects(kv, locals.userEmail);
+			const projects = await getProjects(env, locals.userEmail);
 			if (!projects.some((p) => p.id === projectId)) {
 				return fail(400, { error: 'Project not found' });
 			}
 		}
 
-		const todos = await getTodos(kv, locals.userEmail);
+		const todos = await getTodos(env, locals.userEmail);
 		const todo = todos.find((t) => t.id === todoId);
 		if (!todo) return;
 
@@ -389,11 +432,11 @@ export const sharedActions: Actions = {
 		} else {
 			delete todo.projectId;
 		}
-		await saveTodos(kv, locals.userEmail, todos);
+		await saveTodos(env, locals.userEmail, todos);
 	},
 
 	linkGithub: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
 
@@ -405,7 +448,7 @@ export const sharedActions: Actions = {
 		const parsed = parseGitHubRepo(repo);
 		if (!parsed) return fail(400, { error: 'Invalid repo format. Use owner/repo or a GitHub URL.' });
 
-		const projects = await getProjects(kv, locals.userEmail);
+		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
 		if (!project) return fail(400, { error: 'Project not found' });
 
@@ -423,8 +466,8 @@ export const sharedActions: Actions = {
 				if (!project.detail) project.detail = readmeResult.content;
 			}
 
-			await saveProjects(kv, locals.userEmail, projects);
-			await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+			await saveProjects(env, locals.userEmail, projects);
+			await saveGitHubInfo(env, locals.userEmail, projectId, info);
 		} catch (e) {
 			if (e instanceof GitHubError) {
 				if (e.code === 'not_found') return fail(400, { error: 'Repository not found' });
@@ -438,12 +481,12 @@ export const sharedActions: Actions = {
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
 
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
 		if (!projectId) return fail(400);
 
-		const projects = await getProjects(kv, locals.userEmail);
+		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
 		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
 
@@ -455,35 +498,35 @@ export const sharedActions: Actions = {
 
 		// Write README to project detail
 		project.detail = readmeResult.content;
-		await saveProjects(kv, locals.userEmail, projects);
+		await saveProjects(env, locals.userEmail, projects);
 
 		// Update cached GitHub info with README content
-		const existing = await getGitHubInfo(kv, locals.userEmail, projectId);
+		const existing = await getGitHubInfo(env, locals.userEmail, projectId);
 		if (existing) {
 			existing.readmeContent = readmeResult.content;
 			existing.readmeFetchedAt = Date.now();
 			if (readmeResult.updatedAt) existing.readmeUpdatedAt = readmeResult.updatedAt;
-			await saveGitHubInfo(kv, locals.userEmail, projectId, existing);
+			await saveGitHubInfo(env, locals.userEmail, projectId, existing);
 		}
 	},
 
 	unlinkGithub: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
 		if (!projectId) return fail(400);
 
-		const projects = await getProjects(kv, locals.userEmail);
+		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
 		if (!project) return fail(400);
 
 		delete project.githubRepo;
-		await saveProjects(kv, locals.userEmail, projects);
-		await deleteGitHubInfo(kv, locals.userEmail, projectId);
+		await saveProjects(env, locals.userEmail, projects);
+		await deleteGitHubInfo(env, locals.userEmail, projectId);
 	},
 
 	syncGithub: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
 
@@ -491,7 +534,7 @@ export const sharedActions: Actions = {
 		const projectId = data.get('projectId')?.toString();
 		if (!projectId) return fail(400);
 
-		const projects = await getProjects(kv, locals.userEmail);
+		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
 		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
 
@@ -508,7 +551,7 @@ export const sharedActions: Actions = {
 				info.readmeFetchedAt = Date.now();
 				if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
 			}
-			await saveGitHubInfo(kv, locals.userEmail, projectId, info);
+			await saveGitHubInfo(env, locals.userEmail, projectId, info);
 		} catch (e) {
 			if (e instanceof GitHubError) {
 				if (e.code === 'rate_limited') return fail(429, { error: 'GitHub rate limit exceeded' });
@@ -518,26 +561,26 @@ export const sharedActions: Actions = {
 	},
 
 	addProjectResource: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
 		const url = data.get('url')?.toString().trim();
 		if (!projectId || !url) return fail(400);
 		const label = data.get('label')?.toString().trim() || undefined;
-		await addProjectResource(kv, locals.userEmail, projectId, url, label);
+		await addProjectResource(env, locals.userEmail, projectId, url, label);
 	},
 
 	deleteProjectResource: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
 		const resourceId = data.get('resourceId')?.toString();
 		if (!projectId || !resourceId) return fail(400);
-		await deleteProjectResource(kv, locals.userEmail, projectId, resourceId);
+		await deleteProjectResource(env, locals.userEmail, projectId, resourceId);
 	},
 
 	addProjectAttachment: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const r2 = platform!.env.TIFF_ATTACHMENTS;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
@@ -564,7 +607,7 @@ export const sharedActions: Actions = {
 
 		const providedName = data.get('name')?.toString().trim();
 		const name = providedName || fileName;
-		const stored = await addProjectAttachment(kv, locals.userEmail, projectId, {
+		const stored = await addProjectAttachment(env, locals.userEmail, projectId, {
 			id: attachmentId,
 			name,
 			url: buildAttachmentUrl(projectId, attachmentId),
@@ -580,13 +623,13 @@ export const sharedActions: Actions = {
 	},
 
 	deleteProjectAttachment: async ({ request, locals, platform }) => {
-		const kv = platform!.env.TIFF_KV;
+		const env = platform?.env;
 		const r2 = platform!.env.TIFF_ATTACHMENTS;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
 		const attachmentId = data.get('attachmentId')?.toString();
 		if (!projectId || !attachmentId) return fail(400);
-		const attachment = await deleteProjectAttachment(kv, locals.userEmail, projectId, attachmentId);
+		const attachment = await deleteProjectAttachment(env, locals.userEmail, projectId, attachmentId);
 		if (attachment?.key) await r2.delete(attachment.key);
 	}
 };
