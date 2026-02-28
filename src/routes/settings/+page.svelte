@@ -11,6 +11,7 @@
 	let shortBreakMin = $state(0);
 	let longBreakMin = $state(0);
 	let batchUsers = $state(50);
+	let selectedEmail = $state('');
 	let theme = $state<Theme>('signal');
 	let themeFormEl: HTMLFormElement;
 
@@ -106,8 +107,17 @@
 		>
 			<input type="hidden" name="runId" value={data.migrationStatus.runId ?? ''} />
 			<div class="settings-field">
-				<label class="settings-label" for="batchUsers">Batch users</label>
-				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} />
+				<label class="settings-label" for="selectedEmail">User</label>
+				<select class="settings-input" id="selectedEmail" name="selectedEmail" bind:value={selectedEmail}>
+					<option value="">ALL USERS</option>
+					{#each data.kvUsers as email}
+						<option value={email}>{email}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="settings-field">
+				<label class="settings-label" for="batchUsers">Batch size</label>
+				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} disabled={!!selectedEmail} />
 			</div>
 			<button type="submit" class="btn-save" disabled={!data.migrationStatus.enabled}>MIGRATE DATA</button>
 			{#if !data.migrationStatus.enabled}

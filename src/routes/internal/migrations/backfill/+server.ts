@@ -25,8 +25,38 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	const body = (await request.json().catch(() => ({}))) as {
 		runId?: string;
+		email?: string;
 		batchUsers?: number;
 	};
+	const selectedEmail = body.email?.trim() || null;
+
+	// Single-user mode
+	if (selectedEmail) {
+		const runId = crypto.randomUUID();
+		await ensureMigrationRun(env.TIFF_DB, runId);
+
+		try {
+			await backfillUser(env.TIFF_KV, env.TIFF_DB, selectedEmail);
+			await updateMigrationRunProgress(env.TIFF_DB, runId, {
+				status: 'completed',
+				totalUsers: 1,
+				processedUsersDelta: 1,
+				notes: `Single user: ${selectedEmail}`,
+				finished: true
+			});
+			return json({ runId, processedUsers: 1, totalUsers: 1, failedUsers: [], scanComplete: true });
+		} catch (err) {
+			await updateMigrationRunProgress(env.TIFF_DB, runId, {
+				status: 'failed',
+				totalUsers: 1,
+				notes: `Failed: ${selectedEmail} — ${err instanceof Error ? err.message : String(err)}`,
+				finished: true
+			});
+			throw error(500, `Backfill failed for ${selectedEmail}`);
+		}
+	}
+
+	// Batch mode
 	const runId = body.runId?.trim() || crypto.randomUUID();
 	const batchUsers = Math.max(1, Math.min(500, Number(body.batchUsers) || 50));
 

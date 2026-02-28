@@ -252,8 +252,36 @@ export const sharedActions: Actions = {
 
 		const data = await request.formData();
 		const requestedRunId = data.get('runId')?.toString().trim();
+		const selectedEmail = data.get('selectedEmail')?.toString().trim() || null;
 		const batchUsers = Math.max(1, Math.min(500, Number(data.get('batchUsers') || 50)));
 
+		// Single-user mode: migrate one specific user immediately
+		if (selectedEmail) {
+			const runId = crypto.randomUUID();
+			await ensureMigrationRun(env.TIFF_DB, runId);
+
+			try {
+				await backfillUser(env.TIFF_KV, env.TIFF_DB, selectedEmail);
+				await updateMigrationRunProgress(env.TIFF_DB, runId, {
+					status: 'completed',
+					totalUsers: 1,
+					processedUsersDelta: 1,
+					notes: `Single user: ${selectedEmail}`,
+					finished: true
+				});
+				return { runId, processedUsers: 1, totalUsers: 1, scanComplete: true };
+			} catch (err) {
+				await updateMigrationRunProgress(env.TIFF_DB, runId, {
+					status: 'failed',
+					totalUsers: 1,
+					notes: `Failed: ${selectedEmail} — ${err instanceof Error ? err.message : String(err)}`,
+					finished: true
+				});
+				return fail(500, { error: `Backfill failed for ${selectedEmail}` });
+			}
+		}
+
+		// Batch mode: migrate all users with offset-based pagination
 		let runId = requestedRunId;
 		let offset = 0;
 		if (!runId) {
