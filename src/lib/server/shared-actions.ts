@@ -351,6 +351,34 @@ export const sharedActions: Actions = {
 		};
 	},
 
+	cancelBackfill: async ({ request, platform }) => {
+		const env = platform?.env;
+		if (!env?.TIFF_DB) {
+			return fail(500, { error: 'D1 storage not configured' });
+		}
+		if (!env.MIGRATION_ADMIN_TOKEN) {
+			return fail(403, { error: 'Migration is disabled (missing MIGRATION_ADMIN_TOKEN)' });
+		}
+
+		const data = await request.formData();
+		const runId = data.get('runId')?.toString().trim();
+		if (!runId) return fail(400, { error: 'Run ID is required' });
+
+		const run = await getMigrationRun(env.TIFF_DB, runId);
+		if (!run) return fail(404, { error: 'Migration run not found' });
+		if (run.status !== 'running') {
+			return fail(400, { error: `Cannot cancel a run with status "${run.status}"` });
+		}
+
+		await updateMigrationRunProgress(env.TIFF_DB, runId, {
+			status: 'cancelled',
+			notes: `Cancelled manually at ${run.processedUsers}/${run.totalUsers} users`,
+			finished: true
+		});
+
+		return { cancelled: true, runId };
+	},
+
 	addLog: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
