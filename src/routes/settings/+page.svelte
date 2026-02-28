@@ -125,16 +125,22 @@
 				<span class="migration-status-value migration-run-id">{data.migrationStatus.runId ?? 'N/A'}</span>
 			</div>
 			<div class="migration-status-row">
-				<span class="settings-label">Processed users</span>
-				<span class="migration-status-value">{data.migrationStatus.processedUsers}</span>
+				<span class="settings-label">Progress</span>
+				<span class="migration-status-value">{data.migrationStatus.processedUsers} / {data.migrationStatus.totalUsers} USERS</span>
 			</div>
+			{#if data.migrationStatus.totalUsers > 0}
+				<div class="migration-progress-bar">
+					<div
+						class="migration-progress-fill"
+						class:migration-progress-complete={data.migrationStatus.status === 'completed'}
+						class:migration-progress-failed={data.migrationStatus.status === 'failed'}
+						style="width: {Math.min(100, Math.round((data.migrationStatus.processedUsers / data.migrationStatus.totalUsers) * 100))}%"
+					></div>
+				</div>
+			{/if}
 			<div class="migration-status-row">
 				<span class="settings-label">Mismatched users</span>
 				<span class="migration-status-value">{data.migrationStatus.mismatchedUsers}</span>
-			</div>
-			<div class="migration-status-row">
-				<span class="settings-label">Progress</span>
-				<span class="migration-status-value">{data.migrationStatus.status === 'completed' ? 'COMPLETE' : data.migrationStatus.status === 'running' ? 'PENDING' : data.migrationStatus.status.toUpperCase()}</span>
 			</div>
 			<div class="migration-status-row">
 				<span class="settings-label">Started</span>

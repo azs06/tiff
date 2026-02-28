@@ -66,6 +66,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	await updateMigrationRunProgress(env.TIFF_DB, runId, {
 		status: failed.length > 0 ? 'failed' : scanComplete ? 'completed' : 'running',
+		totalUsers: allEmails.length,
 		processedUsersDelta: processed,
 		notes: failed.length > 0 ? `Failed users: ${failed.map((f) => f.email).join(', ')}` : undefined,
 		finished: scanComplete
@@ -74,6 +75,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	return json({
 		runId,
 		processedUsers: processed,
+		totalUsers: allEmails.length,
 		failedUsers: failed,
 		scanComplete
 	});

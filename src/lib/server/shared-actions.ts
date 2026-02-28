@@ -302,6 +302,7 @@ export const sharedActions: Actions = {
 
 		await updateMigrationRunProgress(env.TIFF_DB, runId, {
 			status: failed.length > 0 ? 'failed' : scanComplete ? 'completed' : 'running',
+			totalUsers: allEmails.length,
 			processedUsersDelta: processed,
 			notes: failed.length > 0 ? `Failed users: ${failed.map((entry) => entry.email).join(', ')}` : undefined,
 			finished: scanComplete
@@ -317,6 +318,7 @@ export const sharedActions: Actions = {
 		return {
 			runId,
 			processedUsers: processed,
+			totalUsers: allEmails.length,
 			scanComplete
 		};
 	},

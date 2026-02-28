@@ -25,6 +25,7 @@ export type MigrationRunRecord = {
 	startedAt: number;
 	finishedAt: number | null;
 	status: 'running' | 'completed' | 'failed';
+	totalUsers: number;
 	processedUsers: number;
 	mismatchedUsers: number;
 	notes: string | null;
@@ -170,6 +171,7 @@ type MigrationRunRow = {
 	started_at: number;
 	finished_at: number | null;
 	status: string;
+	cursor: string | null;
 	processed_users: number;
 	mismatched_users: number;
 	notes: string | null;
@@ -178,7 +180,7 @@ type MigrationRunRow = {
 export async function getMigrationRun(db: D1Database, runId: string): Promise<MigrationRunRecord | null> {
 	const row = await db
 		.prepare(
-			`SELECT run_id, started_at, finished_at, status, processed_users, mismatched_users, notes
+			`SELECT run_id, started_at, finished_at, status, cursor, processed_users, mismatched_users, notes
 			 FROM migration_runs
 			 WHERE run_id = ?
 			 LIMIT 1`
@@ -191,6 +193,7 @@ export async function getMigrationRun(db: D1Database, runId: string): Promise<Mi
 		startedAt: row.started_at,
 		finishedAt: row.finished_at,
 		status: row.status as MigrationRunRecord['status'],
+		totalUsers: Number(row.cursor) || 0,
 		processedUsers: row.processed_users,
 		mismatchedUsers: row.mismatched_users,
 		notes: row.notes
@@ -200,7 +203,7 @@ export async function getMigrationRun(db: D1Database, runId: string): Promise<Mi
 export async function getLatestMigrationRun(db: D1Database): Promise<MigrationRunRecord | null> {
 	const row = await db
 		.prepare(
-			`SELECT run_id, started_at, finished_at, status, processed_users, mismatched_users, notes
+			`SELECT run_id, started_at, finished_at, status, cursor, processed_users, mismatched_users, notes
 			 FROM migration_runs
 			 ORDER BY started_at DESC
 			 LIMIT 1`
@@ -212,6 +215,7 @@ export async function getLatestMigrationRun(db: D1Database): Promise<MigrationRu
 		startedAt: row.started_at,
 		finishedAt: row.finished_at,
 		status: row.status as MigrationRunRecord['status'],
+		totalUsers: Number(row.cursor) || 0,
 		processedUsers: row.processed_users,
 		mismatchedUsers: row.mismatched_users,
 		notes: row.notes
@@ -223,6 +227,7 @@ export async function updateMigrationRunProgress(
 	runId: string,
 	patch: {
 		status?: 'running' | 'completed' | 'failed';
+		totalUsers?: number;
 		processedUsersDelta?: number;
 		mismatchedUsers?: number;
 		notes?: string;
@@ -235,6 +240,10 @@ export async function updateMigrationRunProgress(
 	if (patch.status) {
 		sets.push('status = ?');
 		values.push(patch.status);
+	}
+	if (patch.totalUsers !== undefined) {
+		sets.push('cursor = ?');
+		values.push(String(patch.totalUsers));
 	}
 	if (patch.processedUsersDelta !== undefined) {
 		sets.push('processed_users = processed_users + ?');
