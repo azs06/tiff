@@ -105,7 +105,6 @@
 			}}
 		>
 			<input type="hidden" name="runId" value={data.migrationStatus.runId ?? ''} />
-			<input type="hidden" name="cursor" value={data.migrationStatus.cursor ?? ''} />
 			<div class="settings-field">
 				<label class="settings-label" for="batchUsers">Batch users</label>
 				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} />
@@ -134,8 +133,8 @@
 				<span class="migration-status-value">{data.migrationStatus.mismatchedUsers}</span>
 			</div>
 			<div class="migration-status-row">
-				<span class="settings-label">Cursor</span>
-				<span class="migration-status-value">{data.migrationStatus.cursor ? 'PENDING' : 'COMPLETE'}</span>
+				<span class="settings-label">Progress</span>
+				<span class="migration-status-value">{data.migrationStatus.status === 'completed' ? 'COMPLETE' : data.migrationStatus.status === 'running' ? 'PENDING' : data.migrationStatus.status.toUpperCase()}</span>
 			</div>
 			<div class="migration-status-row">
 				<span class="settings-label">Started</span>

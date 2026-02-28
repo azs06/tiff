@@ -2,9 +2,9 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
 	backfillUser,
-	collectUserEmailBatch,
-	decodeCursor,
+	collectAllUserEmails,
 	ensureMigrationRun,
+	getMigrationRun,
 	updateMigrationRunProgress
 } from '$lib/server/migrations';
 
@@ -23,9 +23,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	requireMigrationToken(request, env.MIGRATION_ADMIN_TOKEN);
 
-	const body = await request.json().catch(() => ({})) as {
+	const body = (await request.json().catch(() => ({}))) as {
 		runId?: string;
-		cursor?: string;
 		batchUsers?: number;
 	};
 	const runId = body.runId?.trim() || crypto.randomUUID();
@@ -33,12 +32,27 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	await ensureMigrationRun(env.TIFF_DB, runId);
 
-	const cursorState = decodeCursor(body.cursor ?? null);
-	const batch = await collectUserEmailBatch(env.TIFF_KV, cursorState, batchUsers);
+	const existing = await getMigrationRun(env.TIFF_DB, runId);
+	const offset = existing?.processedUsers ?? 0;
+
+	let allEmails: string[];
+	try {
+		allEmails = await collectAllUserEmails(env.TIFF_KV);
+	} catch (err) {
+		await updateMigrationRunProgress(env.TIFF_DB, runId, {
+			status: 'failed',
+			notes: `KV scan failed: ${err instanceof Error ? err.message : String(err)}`,
+			finished: true
+		});
+		throw error(500, 'Failed to scan KV for user emails');
+	}
+
+	const batch = allEmails.slice(offset, offset + batchUsers);
+	const scanComplete = offset + batch.length >= allEmails.length;
 
 	const failed: Array<{ email: string; error: string }> = [];
 	let processed = 0;
-	for (const email of batch.emails) {
+	for (const email of batch) {
 		try {
 			await backfillUser(env.TIFF_KV, env.TIFF_DB, email);
 			processed += 1;
@@ -51,18 +65,16 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	}
 
 	await updateMigrationRunProgress(env.TIFF_DB, runId, {
-		status: failed.length > 0 ? 'failed' : batch.scanComplete ? 'completed' : 'running',
-		cursor: batch.nextCursor,
+		status: failed.length > 0 ? 'failed' : scanComplete ? 'completed' : 'running',
 		processedUsersDelta: processed,
 		notes: failed.length > 0 ? `Failed users: ${failed.map((f) => f.email).join(', ')}` : undefined,
-		finished: batch.scanComplete
+		finished: scanComplete
 	});
 
 	return json({
 		runId,
 		processedUsers: processed,
 		failedUsers: failed,
-		nextCursor: batch.nextCursor,
-		scanComplete: batch.scanComplete
+		scanComplete
 	});
 };

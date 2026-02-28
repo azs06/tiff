@@ -38,9 +38,9 @@ import { THEMES } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
 import {
 	backfillUser,
-	collectUserEmailBatch,
-	decodeCursor,
+	collectAllUserEmails,
 	ensureMigrationRun,
+	getMigrationRun,
 	getLatestMigrationRun,
 	updateMigrationRunProgress
 } from '$lib/server/migrations';
@@ -252,28 +252,43 @@ export const sharedActions: Actions = {
 
 		const data = await request.formData();
 		const requestedRunId = data.get('runId')?.toString().trim();
-		const requestedCursor = data.get('cursor')?.toString().trim() || null;
 		const batchUsers = Math.max(1, Math.min(500, Number(data.get('batchUsers') || 50)));
 
 		let runId = requestedRunId;
-		let cursor = requestedCursor;
+		let offset = 0;
 		if (!runId) {
 			const latest = await getLatestMigrationRun(env.TIFF_DB);
 			if (latest?.status === 'running') {
 				runId = latest.runId;
-				cursor = latest.cursor;
+				offset = latest.processedUsers;
 			} else {
 				runId = crypto.randomUUID();
 			}
+		} else {
+			const existing = await getMigrationRun(env.TIFF_DB, runId);
+			if (existing) offset = existing.processedUsers;
 		}
 
 		await ensureMigrationRun(env.TIFF_DB, runId);
-		const cursorState = decodeCursor(cursor);
-		const batch = await collectUserEmailBatch(env.TIFF_KV, cursorState, batchUsers);
+
+		let allEmails: string[];
+		try {
+			allEmails = await collectAllUserEmails(env.TIFF_KV);
+		} catch (err) {
+			await updateMigrationRunProgress(env.TIFF_DB, runId, {
+				status: 'failed',
+				notes: `KV scan failed: ${err instanceof Error ? err.message : String(err)}`,
+				finished: true
+			});
+			return fail(500, { error: 'Failed to scan KV for user emails' });
+		}
+
+		const batch = allEmails.slice(offset, offset + batchUsers);
+		const scanComplete = offset + batch.length >= allEmails.length;
 
 		const failed: Array<{ email: string; error: string }> = [];
 		let processed = 0;
-		for (const email of batch.emails) {
+		for (const email of batch) {
 			try {
 				await backfillUser(env.TIFF_KV, env.TIFF_DB, email);
 				processed += 1;
@@ -286,11 +301,10 @@ export const sharedActions: Actions = {
 		}
 
 		await updateMigrationRunProgress(env.TIFF_DB, runId, {
-			status: failed.length > 0 ? 'failed' : batch.scanComplete ? 'completed' : 'running',
-			cursor: batch.nextCursor,
+			status: failed.length > 0 ? 'failed' : scanComplete ? 'completed' : 'running',
 			processedUsersDelta: processed,
 			notes: failed.length > 0 ? `Failed users: ${failed.map((entry) => entry.email).join(', ')}` : undefined,
-			finished: batch.scanComplete
+			finished: scanComplete
 		});
 
 		if (failed.length > 0) {
@@ -303,7 +317,7 @@ export const sharedActions: Actions = {
 		return {
 			runId,
 			processedUsers: processed,
-			scanComplete: batch.scanComplete
+			scanComplete
 		};
 	},
 

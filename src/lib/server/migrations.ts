@@ -4,17 +4,6 @@ import { DEFAULT_SETTINGS, type FocusState, type PomodoroLog, type Project, type
 
 const EMAIL_PREFIXES = ['todos:', 'pomodoros:', 'focus:', 'sessions:', 'projects:', 'settings:', 'timer:'] as const;
 
-export type ScanCursorState = {
-	prefixIndex: number;
-	cursor: string | null;
-};
-
-export type BackfillBatchResult = {
-	emails: string[];
-	nextCursor: string | null;
-	scanComplete: boolean;
-};
-
 export type UserParityResult = {
 	email: string;
 	matches: boolean;
@@ -36,7 +25,6 @@ export type MigrationRunRecord = {
 	startedAt: number;
 	finishedAt: number | null;
 	status: 'running' | 'completed' | 'failed';
-	cursor: string | null;
 	processedUsers: number;
 	mismatchedUsers: number;
 	notes: string | null;
@@ -108,65 +96,25 @@ function stableJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-export function decodeCursor(cursor: string | null | undefined): ScanCursorState {
-	if (!cursor) return { prefixIndex: 0, cursor: null };
-	try {
-		const parsed = JSON.parse(cursor) as Partial<ScanCursorState>;
-		if (typeof parsed.prefixIndex === 'number') {
-			return {
-				prefixIndex: Math.max(0, Math.min(parsed.prefixIndex, EMAIL_PREFIXES.length)),
-				cursor: typeof parsed.cursor === 'string' ? parsed.cursor : null
-			};
-		}
-	} catch {
-		// Ignore malformed cursor and restart.
-	}
-	return { prefixIndex: 0, cursor: null };
-}
-
-export function encodeCursor(state: ScanCursorState | null): string | null {
-	if (!state) return null;
-	return JSON.stringify(state);
-}
-
-export async function collectUserEmailBatch(
-	kv: KVNamespace,
-	cursorState: ScanCursorState,
-	batchUsers = 50
-): Promise<BackfillBatchResult> {
+export async function collectAllUserEmails(kv: KVNamespace): Promise<string[]> {
 	const users = new Set<string>();
-	let prefixIndex = cursorState.prefixIndex;
-	let cursor = cursorState.cursor;
-
-	while (prefixIndex < EMAIL_PREFIXES.length && users.size < batchUsers) {
-		const prefix = EMAIL_PREFIXES[prefixIndex];
-		const listed = await kv.list({
-			prefix,
-			cursor: cursor ?? undefined,
-			limit: 1000
-		});
-
-		for (const key of listed.keys) {
-			if (!key.name.startsWith(prefix)) continue;
-			const email = key.name.slice(prefix.length).trim();
-			if (email) users.add(email);
-		}
-
-		if (listed.list_complete) {
-			prefixIndex += 1;
-			cursor = null;
-		} else {
-			cursor = listed.cursor;
+	for (const prefix of EMAIL_PREFIXES) {
+		let cursor: string | undefined;
+		let done = false;
+		while (!done) {
+			const listed = await kv.list({ prefix, cursor, limit: 1000 });
+			for (const key of listed.keys) {
+				const email = key.name.slice(prefix.length).trim();
+				if (email) users.add(email);
+			}
+			if (listed.list_complete) {
+				done = true;
+			} else {
+				cursor = listed.cursor;
+			}
 		}
 	}
-
-	const done = prefixIndex >= EMAIL_PREFIXES.length;
-	const nextCursor = done ? null : encodeCursor({ prefixIndex, cursor });
-	return {
-		emails: Array.from(users),
-		nextCursor,
-		scanComplete: done
-	};
+	return Array.from(users).sort();
 }
 
 function migrateLegacyTimer(focus: FocusState | null, timer: Awaited<ReturnType<typeof kvStore.getTimer>>): FocusState | null {
@@ -222,7 +170,6 @@ type MigrationRunRow = {
 	started_at: number;
 	finished_at: number | null;
 	status: string;
-	cursor: string | null;
 	processed_users: number;
 	mismatched_users: number;
 	notes: string | null;
@@ -231,7 +178,7 @@ type MigrationRunRow = {
 export async function getMigrationRun(db: D1Database, runId: string): Promise<MigrationRunRecord | null> {
 	const row = await db
 		.prepare(
-			`SELECT run_id, started_at, finished_at, status, cursor, processed_users, mismatched_users, notes
+			`SELECT run_id, started_at, finished_at, status, processed_users, mismatched_users, notes
 			 FROM migration_runs
 			 WHERE run_id = ?
 			 LIMIT 1`
@@ -244,7 +191,6 @@ export async function getMigrationRun(db: D1Database, runId: string): Promise<Mi
 		startedAt: row.started_at,
 		finishedAt: row.finished_at,
 		status: row.status as MigrationRunRecord['status'],
-		cursor: row.cursor,
 		processedUsers: row.processed_users,
 		mismatchedUsers: row.mismatched_users,
 		notes: row.notes
@@ -254,7 +200,7 @@ export async function getMigrationRun(db: D1Database, runId: string): Promise<Mi
 export async function getLatestMigrationRun(db: D1Database): Promise<MigrationRunRecord | null> {
 	const row = await db
 		.prepare(
-			`SELECT run_id, started_at, finished_at, status, cursor, processed_users, mismatched_users, notes
+			`SELECT run_id, started_at, finished_at, status, processed_users, mismatched_users, notes
 			 FROM migration_runs
 			 ORDER BY started_at DESC
 			 LIMIT 1`
@@ -266,7 +212,6 @@ export async function getLatestMigrationRun(db: D1Database): Promise<MigrationRu
 		startedAt: row.started_at,
 		finishedAt: row.finished_at,
 		status: row.status as MigrationRunRecord['status'],
-		cursor: row.cursor,
 		processedUsers: row.processed_users,
 		mismatchedUsers: row.mismatched_users,
 		notes: row.notes
@@ -278,7 +223,6 @@ export async function updateMigrationRunProgress(
 	runId: string,
 	patch: {
 		status?: 'running' | 'completed' | 'failed';
-		cursor?: string | null;
 		processedUsersDelta?: number;
 		mismatchedUsers?: number;
 		notes?: string;
@@ -291,10 +235,6 @@ export async function updateMigrationRunProgress(
 	if (patch.status) {
 		sets.push('status = ?');
 		values.push(patch.status);
-	}
-	if (patch.cursor !== undefined) {
-		sets.push('cursor = ?');
-		values.push(patch.cursor);
 	}
 	if (patch.processedUsersDelta !== undefined) {
 		sets.push('processed_users = processed_users + ?');

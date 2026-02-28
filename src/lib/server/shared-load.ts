@@ -40,7 +40,6 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 				status: 'idle' as const,
 				startedAt: null,
 				finishedAt: null,
-				cursor: null,
 				processedUsers: 0,
 				mismatchedUsers: 0,
 				notes: null
@@ -155,7 +154,6 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 			status: latestMigrationRun?.status ?? ('idle' as const),
 			startedAt: latestMigrationRun?.startedAt ?? null,
 			finishedAt: latestMigrationRun?.finishedAt ?? null,
-			cursor: latestMigrationRun?.cursor ?? null,
 			processedUsers: latestMigrationRun?.processedUsers ?? 0,
 			mismatchedUsers: latestMigrationRun?.mismatchedUsers ?? 0,
 			notes: latestMigrationRun?.notes ?? null
