@@ -11,6 +11,7 @@
 	let shortBreakMin = $state(0);
 	let longBreakMin = $state(0);
 	let batchUsers = $state(50);
+	let selectedEmail = $state('');
 	let theme = $state<Theme>('signal');
 	let themeFormEl: HTMLFormElement;
 
@@ -105,10 +106,18 @@
 			}}
 		>
 			<input type="hidden" name="runId" value={data.migrationStatus.runId ?? ''} />
-			<input type="hidden" name="cursor" value={data.migrationStatus.cursor ?? ''} />
 			<div class="settings-field">
-				<label class="settings-label" for="batchUsers">Batch users</label>
-				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} />
+				<label class="settings-label" for="selectedEmail">User</label>
+				<select class="settings-input" id="selectedEmail" name="selectedEmail" bind:value={selectedEmail}>
+					<option value="">ALL USERS</option>
+					{#each data.kvUsers as email}
+						<option value={email}>{email}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="settings-field">
+				<label class="settings-label" for="batchUsers">Batch size</label>
+				<input class="settings-input" type="number" id="batchUsers" name="batchUsers" min="1" max="500" bind:value={batchUsers} disabled={!!selectedEmail} />
 			</div>
 			<button type="submit" class="btn-save" disabled={!data.migrationStatus.enabled}>MIGRATE DATA</button>
 			{#if !data.migrationStatus.enabled}
@@ -126,16 +135,22 @@
 				<span class="migration-status-value migration-run-id">{data.migrationStatus.runId ?? 'N/A'}</span>
 			</div>
 			<div class="migration-status-row">
-				<span class="settings-label">Processed users</span>
-				<span class="migration-status-value">{data.migrationStatus.processedUsers}</span>
+				<span class="settings-label">Progress</span>
+				<span class="migration-status-value">{data.migrationStatus.processedUsers} / {data.migrationStatus.totalUsers} USERS</span>
 			</div>
+			{#if data.migrationStatus.totalUsers > 0}
+				<div class="migration-progress-bar">
+					<div
+						class="migration-progress-fill"
+						class:migration-progress-complete={data.migrationStatus.status === 'completed'}
+						class:migration-progress-failed={data.migrationStatus.status === 'failed'}
+						style="width: {Math.min(100, Math.round((data.migrationStatus.processedUsers / data.migrationStatus.totalUsers) * 100))}%"
+					></div>
+				</div>
+			{/if}
 			<div class="migration-status-row">
 				<span class="settings-label">Mismatched users</span>
 				<span class="migration-status-value">{data.migrationStatus.mismatchedUsers}</span>
-			</div>
-			<div class="migration-status-row">
-				<span class="settings-label">Cursor</span>
-				<span class="migration-status-value">{data.migrationStatus.cursor ? 'PENDING' : 'COMPLETE'}</span>
 			</div>
 			<div class="migration-status-row">
 				<span class="settings-label">Started</span>
