@@ -24,7 +24,7 @@ export type MigrationRunRecord = {
 	runId: string;
 	startedAt: number;
 	finishedAt: number | null;
-	status: 'running' | 'completed' | 'failed';
+	status: 'running' | 'completed' | 'failed' | 'cancelled';
 	totalUsers: number;
 	processedUsers: number;
 	mismatchedUsers: number;
@@ -97,6 +97,13 @@ function stableJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+export function isValidEmail(email: string): boolean {
+	if (!email) return false;
+	if (email === 'undefined' || email === 'null') return false;
+	if (!email.includes('@')) return false;
+	return true;
+}
+
 export async function collectAllUserEmails(kv: KVNamespace): Promise<string[]> {
 	const users = new Set<string>();
 	for (const prefix of EMAIL_PREFIXES) {
@@ -106,7 +113,7 @@ export async function collectAllUserEmails(kv: KVNamespace): Promise<string[]> {
 			const listed = await kv.list({ prefix, cursor, limit: 1000 });
 			for (const key of listed.keys) {
 				const email = key.name.slice(prefix.length).trim();
-				if (email) users.add(email);
+				if (isValidEmail(email)) users.add(email);
 			}
 			if (listed.list_complete) {
 				done = true;
@@ -226,7 +233,7 @@ export async function updateMigrationRunProgress(
 	db: D1Database,
 	runId: string,
 	patch: {
-		status?: 'running' | 'completed' | 'failed';
+		status?: 'running' | 'completed' | 'failed' | 'cancelled';
 		totalUsers?: number;
 		processedUsersDelta?: number;
 		mismatchedUsers?: number;

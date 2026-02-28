@@ -125,6 +125,22 @@
 			{/if}
 		</form>
 
+		{#if data.migrationStatus.status === 'running' && data.migrationStatus.runId}
+			<form
+				method="POST"
+				action="?/cancelBackfill"
+				class="detail-form settings-page-form"
+				use:enhance={() => {
+					return async ({ update }) => {
+						await update({ reset: false, invalidateAll: true });
+					};
+				}}
+			>
+				<input type="hidden" name="runId" value={data.migrationStatus.runId} />
+				<button type="submit" class="btn-save btn-danger">CANCEL MIGRATION</button>
+			</form>
+		{/if}
+
 		<div class="migration-status-card">
 			<div class="migration-status-row">
 				<span class="settings-label">Run status</span>
@@ -143,7 +159,7 @@
 					<div
 						class="migration-progress-fill"
 						class:migration-progress-complete={data.migrationStatus.status === 'completed'}
-						class:migration-progress-failed={data.migrationStatus.status === 'failed'}
+						class:migration-progress-failed={data.migrationStatus.status === 'failed' || data.migrationStatus.status === 'cancelled'}
 						style="width: {Math.min(100, Math.round((data.migrationStatus.processedUsers / data.migrationStatus.totalUsers) * 100))}%"
 					></div>
 				</div>
