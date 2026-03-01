@@ -59,6 +59,20 @@
 			window.removeEventListener('resize', updateMobileSidebarOffset);
 		};
 	});
+
+	/* Hide the mobile bottom nav when the virtual keyboard is open */
+	$effect(() => {
+		const vv = window.visualViewport;
+		if (!vv || !leftSidebarEl) return;
+
+		const onViewportResize = () => {
+			const keyboardOpen = window.innerHeight - vv.height > 150;
+			leftSidebarEl?.classList.toggle('keyboard-open', keyboardOpen);
+		};
+
+		vv.addEventListener('resize', onViewportResize, { passive: true });
+		return () => vv.removeEventListener('resize', onViewportResize);
+	});
 </script>
 
 <svelte:head>
