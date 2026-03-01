@@ -3841,6 +3841,12 @@ button:active:not(.todo-title) {
 		pointer-events: auto;
 	}
 
+	.left-sidebar.keyboard-open {
+		transform: translateY(100%);
+		pointer-events: none;
+		transition: transform 0.15s ease-out;
+	}
+
 	.left-sidebar .sidebar-header {
 		display: none;
 	}
