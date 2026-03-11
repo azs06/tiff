@@ -14,9 +14,6 @@ import {
 	deleteTaskLog,
 	getProjects,
 	saveProjects,
-	getFocus,
-	saveFocus,
-	endActiveSession,
 	saveTodos,
 	updateProject,
 	addProjectResource,
@@ -28,12 +25,22 @@ import {
 	deleteGitHubInfo,
 	archiveProject,
 	unarchiveProject,
+	expandFocusTaskTx,
 	focusTaskTx,
-	unfocusTx,
+	pauseFocusTaskTx,
+	resumeFocusTaskTx,
+	stopFocusTaskTx,
+	startTaskPomodoroTx,
+	pauseTaskPomodoroTx,
+	resumeTaskPomodoroTx,
+	resetTaskPomodoroTx,
+	advanceTaskPomodoroTx,
+	stopTaskPomodoroTx,
+	dismissTaskPomodoroTx,
 	toggleTodoAndHandleFocusTx,
 	deleteProjectCascadeTx
 } from '$lib/storage';
-import type { FocusState, UserSettings, Theme } from '$lib/types';
+import type { UserSettings, Theme } from '$lib/types';
 import { THEMES } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
 
@@ -107,13 +114,7 @@ export const sharedActions: Actions = {
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-
-		const focus = await getFocus(env, locals.userEmail);
-		if (focus?.activeTaskId === id) {
-			await endActiveSession(env, locals.userEmail, 'manual');
-			await saveFocus(env, locals.userEmail, null);
-		}
-
+		await stopFocusTaskTx(env, locals.userEmail, id, 'manual');
 		await deleteTodo(env, locals.userEmail, id);
 	},
 
@@ -150,18 +151,6 @@ export const sharedActions: Actions = {
 		await logPomodoro(env, locals.userEmail, { taskId, type, duration });
 	},
 
-	syncFocus: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const raw = data.get('focus')?.toString();
-		if (!raw || raw === 'null') {
-			await saveFocus(env, locals.userEmail, null);
-		} else {
-			const parsed = JSON.parse(raw) as FocusState;
-			await saveFocus(env, locals.userEmail, parsed);
-		}
-	},
-
 	focusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
@@ -170,9 +159,98 @@ export const sharedActions: Actions = {
 		await focusTaskTx(env, locals.userEmail, taskId);
 	},
 
-	unfocus: async ({ locals, platform }) => {
+	expandFocusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
-		await unfocusTx(env, locals.userEmail, 'manual');
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await expandFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	pauseFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await pauseFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	resumeFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resumeFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	stopFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await stopFocusTaskTx(env, locals.userEmail, taskId, 'manual');
+	},
+
+	unfocus: async ({ locals, platform }) => {
+		void locals;
+		void platform;
+		return fail(400, { error: 'Unfocus all is no longer supported from the UI' });
+	},
+
+	startTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await startTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	pauseTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await pauseTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	resumeTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resumeTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	resetTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resetTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	advanceTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await advanceTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	stopTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await stopTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	dismissTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await dismissTaskPomodoroTx(env, locals.userEmail, taskId);
 	},
 
 	archive: async ({ request, locals, platform }) => {

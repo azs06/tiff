@@ -2,6 +2,7 @@ import type {
 	FocusSession,
 	FocusState,
 	GitHubRepoInfo,
+	LegacyFocusState,
 	PomodoroLog,
 	Project,
 	ProjectAttachment,
@@ -12,6 +13,7 @@ import type {
 	UserSettings
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
+import { normalizeFocusState } from './focus';
 
 function toBool(value: unknown): boolean {
 	if (typeof value === 'boolean') return value;
@@ -111,6 +113,7 @@ type FocusStateRow = {
 	pomo_completed_pomodoros: number | null;
 	pomo_paused: number | null;
 	pomo_paused_remaining: number | null;
+	payload_json: string | null;
 };
 
 type FocusSessionRow = {
@@ -710,7 +713,8 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 			 pomo_type,
 			 pomo_completed_pomodoros,
 			 pomo_paused,
-			 pomo_paused_remaining
+			 pomo_paused_remaining,
+			 payload_json
 			 FROM focus_state
 			 WHERE user_email = ?`
 		)
@@ -719,17 +723,23 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 
 	if (!row) return null;
 
-	const focus: FocusState = {
+	if (row.payload_json) {
+		try {
+			return normalizeFocusState(JSON.parse(row.payload_json) as FocusState);
+		} catch {
+			// Fall through to legacy columns.
+		}
+	}
+
+	const legacy: LegacyFocusState = {
 		activeTaskId: row.active_task_id,
 		focusedAt: row.focused_at
 	};
-
-	if (row.session_paused !== null) focus.sessionPaused = toBool(row.session_paused);
-	if (row.paused_at !== null) focus.pausedAt = row.paused_at;
-	if (row.accumulated_pause_ms !== null) focus.accumulatedPauseMs = row.accumulated_pause_ms;
-
+	if (row.session_paused !== null) legacy.sessionPaused = toBool(row.session_paused);
+	if (row.paused_at !== null) legacy.pausedAt = row.paused_at;
+	if (row.accumulated_pause_ms !== null) legacy.accumulatedPauseMs = row.accumulated_pause_ms;
 	if (row.pomo_started_at !== null && row.pomo_duration !== null && row.pomo_type !== null) {
-		focus.pomodoro = {
+		legacy.pomodoro = {
 			startedAt: row.pomo_started_at,
 			duration: row.pomo_duration,
 			type: row.pomo_type,
@@ -738,8 +748,7 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 			pausedRemaining: row.pomo_paused_remaining ?? undefined
 		};
 	}
-
-	return focus;
+	return normalizeFocusState(legacy);
 }
 
 export async function saveFocus(db: D1Database, email: string, focus: FocusState | null): Promise<void> {
@@ -747,6 +756,15 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 		await db.prepare('DELETE FROM focus_state WHERE user_email = ?').bind(email).run();
 		return;
 	}
+
+	const normalized = normalizeFocusState(focus);
+	if (!normalized) {
+		await db.prepare('DELETE FROM focus_state WHERE user_email = ?').bind(email).run();
+		return;
+	}
+
+	const anchorTask =
+		normalized.tasks.find((task) => task.taskId === normalized.expandedTaskId) ?? normalized.tasks[0];
 
 	await db
 		.prepare(
@@ -762,8 +780,9 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			 pomo_type,
 			 pomo_completed_pomodoros,
 			 pomo_paused,
-			 pomo_paused_remaining
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 pomo_paused_remaining,
+			 payload_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(user_email) DO UPDATE SET
 			 active_task_id = excluded.active_task_id,
 			 focused_at = excluded.focused_at,
@@ -775,21 +794,23 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			 pomo_type = excluded.pomo_type,
 			 pomo_completed_pomodoros = excluded.pomo_completed_pomodoros,
 			 pomo_paused = excluded.pomo_paused,
-			 pomo_paused_remaining = excluded.pomo_paused_remaining`
+			 pomo_paused_remaining = excluded.pomo_paused_remaining,
+			 payload_json = excluded.payload_json`
 		)
 		.bind(
 			email,
-			focus.activeTaskId,
-			focus.focusedAt,
-			toDbBool(focus.sessionPaused),
-			focus.pausedAt ?? null,
-			focus.accumulatedPauseMs ?? null,
-			focus.pomodoro?.startedAt ?? null,
-			focus.pomodoro?.duration ?? null,
-			focus.pomodoro?.type ?? null,
-			focus.pomodoro?.completedPomodoros ?? null,
-			toDbBool(focus.pomodoro?.paused),
-			focus.pomodoro?.pausedRemaining ?? null
+			anchorTask.taskId,
+			anchorTask.addedAt,
+			anchorTask.sessionStatus === 'paused' ? 1 : 0,
+			null,
+			anchorTask.sessionElapsedMs,
+			anchorTask.pomodoro?.startedAt ?? null,
+			anchorTask.pomodoro?.duration ?? null,
+			anchorTask.pomodoro?.type ?? null,
+			anchorTask.pomodoro?.completedPomodoros ?? null,
+			toDbBool(anchorTask.pomodoro?.paused),
+			anchorTask.pomodoro?.pausedRemaining ?? null,
+			JSON.stringify(normalized)
 		)
 		.run();
 }

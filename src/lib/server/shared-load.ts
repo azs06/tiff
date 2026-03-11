@@ -7,12 +7,14 @@ import {
 	getSessions,
 	getTimer,
 	saveFocus,
+	saveSessions,
 	saveTimer,
 	getGitHubInfo,
 	saveGitHubInfo,
 	hasAnyStorage
 } from '$lib/storage';
-import { DEFAULT_SETTINGS, type FocusState, type GitHubRepoInfo } from '$lib/types';
+import { DEFAULT_SETTINGS, type LegacyFocusState, type GitHubRepoInfo } from '$lib/types';
+import { ensureOpenSession, normalizeFocusState } from '$lib/focus';
 import { parseGitHubRepo, fetchRepoInfo, isCacheFresh } from '$lib/github';
 
 export async function loadAppData(locals: App.Locals, platform: App.Platform | undefined) {
@@ -36,7 +38,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 	const email = locals.userEmail;
 	const githubToken = env?.GITHUB_TOKEN;
 
-	const [allTodos, serverFocus, settings, pomodoroLogs, projects, sessions] = await Promise.all([
+	const [allTodos, serverFocus, settings, pomodoroLogs, projects, storedSessions] = await Promise.all([
 		getTodos(env, email),
 		getFocus(env, email),
 		getSettings(env, email),
@@ -47,10 +49,12 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 
 	// Legacy compatibility: convert old TimerState records into FocusState on first read.
 	let focus = serverFocus;
+	let sessions = storedSessions;
+	let migratedFocus = false;
 	if (!focus) {
 		const oldTimer = await getTimer(env, email);
 		if (oldTimer) {
-			focus = {
+			focus = normalizeFocusState({
 				activeTaskId: oldTimer.activeTaskId,
 				focusedAt: oldTimer.startedAt,
 				pomodoro: {
@@ -61,10 +65,38 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 					paused: oldTimer.paused,
 					pausedRemaining: oldTimer.pausedRemaining
 				}
-			} satisfies FocusState;
+			} satisfies LegacyFocusState);
+			migratedFocus = true;
 			await saveFocus(env, email, focus);
 			await saveTimer(env, email, null);
 		}
+	}
+
+	const validFocusTaskIds = new Set(allTodos.filter((todo) => !todo.done && !todo.archived).map((todo) => todo.id));
+	const prunedFocus = focus
+		? normalizeFocusState({
+				expandedTaskId: focus.expandedTaskId,
+				tasks: focus.tasks.filter((task) => validFocusTaskIds.has(task.taskId))
+			})
+		: null;
+
+	if (focus && JSON.stringify(prunedFocus) !== JSON.stringify(focus)) {
+		focus = prunedFocus;
+		await saveFocus(env, email, focus);
+	}
+
+	for (const task of focus?.tasks ?? []) {
+		if (task.sessionStatus === 'running' && task.sessionStartedAt) {
+			const nextSessions = ensureOpenSession(sessions, task.taskId, task.sessionStartedAt);
+			if (nextSessions !== sessions) {
+				sessions = nextSessions;
+				migratedFocus = true;
+			}
+		}
+	}
+
+	if (migratedFocus && sessions !== storedSessions) {
+		await saveSessions(env, email, sessions);
 	}
 
 	// Load GitHub info for linked projects

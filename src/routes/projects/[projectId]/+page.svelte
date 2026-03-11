@@ -49,6 +49,7 @@
 
 <main class="main-content view-main">
 	<header class="main-header view-header">
+		<a class="view-back-button" href="/projects" aria-label="Back to projects">← Projects</a>
 		<span class="tagline">Project Details</span>
 	</header>
 
@@ -59,7 +60,6 @@
 			<article class="project-card project-detail-card">
 				<div class="project-card-header project-detail-top">
 					<div class="project-title-block">
-						<a class="project-back-link" href="/projects">← Back to projects</a>
 						<h2>{project.name}</h2>
 						<div class="project-card-meta">
 							<span>{projectTodos.filter((todo) => !todo.done).length} active</span>

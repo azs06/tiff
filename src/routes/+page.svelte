@@ -1,9 +1,19 @@
 <script lang="ts">
 	import { enhance } from "$app/forms";
+	import { invalidateAll } from "$app/navigation";
 	import { tick } from "svelte";
 	import type { PageData } from "./$types";
-	import type { FocusState, PomodoroLog, FocusSession } from "$lib/types";
-	import { nextInterval } from "$lib/pomodoro";
+	import type { PomodoroLog, FocusSession } from "$lib/types";
+	import {
+		focusTaskIds,
+		getDisplayTimer,
+		getExpandedFocusedTask,
+		getFocusedTask,
+		getPomodoroRemaining,
+		getSessionElapsed,
+		hasExpiredPomodoro,
+		normalizeFocusState,
+	} from "$lib/focus";
 
 	let { data }: { data: PageData } = $props();
 
@@ -88,83 +98,36 @@
 		return `${window.location.pathname}${window.location.search}${hash}`;
 	}
 
-	let focus = $state<FocusState | null>(null);
-	let syncFocusFormEl: HTMLFormElement;
-	let focusFormEl: HTMLFormElement;
-	let unfocusFormEl: HTMLFormElement;
-	let focusJson = $derived(focus ? JSON.stringify(focus) : "null");
-
-	let focusHydrated = false;
-	$effect(() => {
-		if (focusHydrated) return;
-		focusHydrated = true;
-		const server: FocusState | null = data.serverFocus;
-		if (server) {
-			focus = server;
-			localStorage.setItem("tiff-focus", JSON.stringify(server));
-		} else {
-			localStorage.removeItem("tiff-focus");
-		}
-	});
-
-	function setFocus(next: FocusState | null) {
-		focus = next;
-		if (next) {
-			localStorage.setItem("tiff-focus", JSON.stringify(next));
-		} else {
-			localStorage.removeItem("tiff-focus");
-		}
-		syncFocusFormEl?.requestSubmit();
-	}
+	let now = $state(Date.now());
 
 	$effect(() => {
-		if (
-			focus &&
-			!data.todos.some(
-				(t: { id: string }) => t.id === focus!.activeTaskId,
-			)
-		) {
-			setFocus(null);
-		}
-	});
-
-	let focusedTodo = $derived(
-		focus
-			? data.todos.find(
-					(t: { id: string }) => t.id === focus!.activeTaskId,
-				)
-			: null,
-	);
-
-	$effect(() => {
-		if (focus && focusedTodo?.done) {
-			setFocus(null);
-		}
-	});
-
-	let sessionElapsed = $state(0);
-
-	$effect(() => {
-		if (!focus) {
-			sessionElapsed = 0;
-			return;
-		}
-		const start = focus.focusedAt;
-		const accumulated = focus.accumulatedPauseMs ?? 0;
-
-		if (focus.sessionPaused) {
-			const pausedDuration = focus.pausedAt ? Date.now() - focus.pausedAt : 0;
-			sessionElapsed = Date.now() - start - accumulated - pausedDuration;
-			return;
-		}
-
-		const tick = () => {
-			sessionElapsed = Date.now() - start - accumulated;
-		};
-		tick();
-		const id = setInterval(tick, 1000);
+		const id = setInterval(() => {
+			now = Date.now();
+		}, 1000);
 		return () => clearInterval(id);
 	});
+
+	let focus = $derived(normalizeFocusState(data.serverFocus));
+	let visibleFocus = $derived(
+		normalizeFocusState({
+			expandedTaskId: focus?.expandedTaskId ?? null,
+			tasks: (focus?.tasks ?? []).filter((task) =>
+				data.todos.some((todo) => todo.id === task.taskId),
+			),
+		}),
+	);
+	let focusedTaskIdSet = $derived(focusTaskIds(visibleFocus));
+	let expandedFocusedTask = $derived(
+		visibleFocus ? getExpandedFocusedTask(visibleFocus) : null,
+	);
+	let collapsedFocusedTasks = $derived(
+		visibleFocus?.tasks.filter((task) => task.taskId !== expandedFocusedTask?.taskId) ?? [],
+	);
+	let focusedTodo = $derived(
+		expandedFocusedTask
+			? data.todos.find((todo) => todo.id === expandedFocusedTask.taskId) ?? null
+			: null,
+	);
 
 	function formatElapsed(ms: number): string {
 		const totalSeconds = Math.floor(ms / 1000);
@@ -177,47 +140,30 @@
 		return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 	}
 
-	let pomoRemaining = $state(0);
-	let pomoExpired = $state(false);
-	let logFormEl: HTMLFormElement;
-
-	$effect(() => {
-		if (!focus?.pomodoro) {
-			pomoRemaining = 0;
-			pomoExpired = false;
-			return;
-		}
-
-		const pomo = focus.pomodoro;
-		if (pomo.paused) {
-			pomoRemaining = Math.max(0, pomo.pausedRemaining ?? 0);
-			pomoExpired = pomoRemaining === 0;
-			return;
-		}
-
-		const { startedAt, duration } = pomo;
-		const tick = () => {
-			pomoRemaining = Math.max(0, startedAt + duration - Date.now());
-			pomoExpired = pomoRemaining === 0;
-		};
-
-		tick();
-		const intervalId = setInterval(tick, 1000);
-		return () => clearInterval(intervalId);
-	});
-
 	let pomoLabel = $derived(
-		focus?.pomodoro
-			? focus.pomodoro.type === "work"
+		expandedFocusedTask?.pomodoro
+			? expandedFocusedTask.pomodoro.type === "work"
 				? "WORK"
-				: focus.pomodoro.type === "short-break"
+				: expandedFocusedTask.pomodoro.type === "short-break"
 					? "SHORT BREAK"
 					: "LONG BREAK"
 			: "",
 	);
 
 	let cyclesFilled = $derived(
-		focus?.pomodoro ? focus.pomodoro.completedPomodoros % 4 : 0,
+		expandedFocusedTask?.pomodoro
+			? expandedFocusedTask.pomodoro.completedPomodoros % 4
+			: 0,
+	);
+
+	let sessionElapsed = $derived(
+		expandedFocusedTask ? getSessionElapsed(expandedFocusedTask, now) : 0,
+	);
+	let pomoRemaining = $derived(
+		expandedFocusedTask ? getPomodoroRemaining(expandedFocusedTask, now) : 0,
+	);
+	let pomoExpired = $derived(
+		expandedFocusedTask ? hasExpiredPomodoro(expandedFocusedTask, now) : false,
 	);
 
 	function formatTime(ms: number): string {
@@ -233,171 +179,75 @@
 		hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
-	function focusOnTask(taskId: string) {
-		setFocus({
-			activeTaskId: taskId,
-			focusedAt: Date.now(),
-			sessionPaused: false,
-			pausedAt: undefined,
-			accumulatedPauseMs: 0,
-		});
-		tick().then(() => {
-			focusFormEl?.requestSubmit();
-			scrollFocusedHeroIntoView();
-		});
-	}
-
-	function unfocusTask() {
-		setFocus(null);
-		unfocusFormEl?.requestSubmit();
-	}
-
-	function pauseSession() {
-		if (!focus || focus.sessionPaused) return;
-		setFocus({
-			...focus,
-			sessionPaused: true,
-			pausedAt: Date.now(),
-		});
-	}
-
-	function resumeSession() {
-		if (!focus || !focus.sessionPaused) return;
-		const pausedDuration = focus.pausedAt ? Date.now() - focus.pausedAt : 0;
-		setFocus({
-			...focus,
-			sessionPaused: false,
-			pausedAt: undefined,
-			accumulatedPauseMs: (focus.accumulatedPauseMs ?? 0) + pausedDuration,
-		});
-	}
-
-	function startPomodoro() {
-		if (!focus) return;
-		setFocus({
-			...focus,
-			pomodoro: {
-				startedAt: Date.now(),
-				duration: data.settings.workMs,
-				type: "work",
-				completedPomodoros: 0,
-				paused: false,
+	async function postAction(action: string, values: Record<string, string>) {
+		const formData = new FormData();
+		for (const [key, value] of Object.entries(values)) {
+			formData.set(key, value);
+		}
+		const response = await fetch(`?/${action}`, {
+			method: "POST",
+			body: formData,
+			headers: {
+				"x-sveltekit-action": "true",
 			},
 		});
+		if (!response.ok) {
+			throw new Error(`Focus action failed: ${action}`);
+		}
+		await invalidateAll();
 	}
 
-	function pomoPause() {
-		if (!focus?.pomodoro || focus.pomodoro.paused) return;
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				paused: true,
-				pausedRemaining: Math.max(
-					0,
-					focus.pomodoro.startedAt +
-						focus.pomodoro.duration -
-						Date.now(),
-				),
-			},
-		});
+	async function focusOnTask(taskId: string) {
+		await postAction("focusTask", { taskId });
+		await tick();
+		scrollFocusedHeroIntoView();
 	}
 
-	function pomoResume() {
-		if (!focus?.pomodoro || !focus.pomodoro.paused) return;
-		const rem = focus.pomodoro.pausedRemaining ?? 0;
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				startedAt: Date.now(),
-				duration: rem,
-				paused: false,
-				pausedRemaining: undefined,
-			},
-		});
+	async function expandTask(taskId: string) {
+		await postAction("expandFocusTask", { taskId });
+		await tick();
+		scrollFocusedHeroIntoView();
 	}
 
-	function pomoReset() {
-		if (!focus?.pomodoro) return;
-		const duration =
-			focus.pomodoro.type === "work"
-				? data.settings.workMs
-				: focus.pomodoro.type === "short-break"
-					? data.settings.shortBreakMs
-					: data.settings.longBreakMs;
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				startedAt: Date.now(),
-				duration,
-				paused: false,
-				pausedRemaining: undefined,
-			},
-		});
+	async function toggleTaskRunState(taskId: string) {
+		const task = getFocusedTask(visibleFocus, taskId);
+		if (!task) return;
+		await postAction(
+			task.sessionStatus === "running" ? "pauseFocusTask" : "resumeFocusTask",
+			{ taskId },
+		);
 	}
 
-	function pomoStartBreak() {
-		if (!focus?.pomodoro) return;
-		const completed =
-			focus.pomodoro.type === "work"
-				? focus.pomodoro.completedPomodoros + 1
-				: focus.pomodoro.completedPomodoros;
-		const next = nextInterval(completed, data.settings);
-		logPomodoroToServer();
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				startedAt: Date.now(),
-				duration: next.duration,
-				type: next.type,
-				completedPomodoros: completed,
-				paused: false,
-				pausedRemaining: undefined,
-			},
-		});
+	async function stopTask(taskId: string) {
+		await postAction("stopFocusTask", { taskId });
 	}
 
-	function pomoStartWork() {
-		if (!focus?.pomodoro) return;
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				startedAt: Date.now(),
-				duration: data.settings.workMs,
-				type: "work",
-				paused: false,
-				pausedRemaining: undefined,
-			},
-		});
+	async function startPomodoro(taskId: string) {
+		await postAction("startTaskPomodoro", { taskId });
 	}
 
-	function pomoStop() {
-		if (!focus?.pomodoro) return;
-		setFocus({
-			...focus,
-			pomodoro: {
-				...focus.pomodoro,
-				paused: true,
-				pausedRemaining: 0,
-			},
-		});
+	async function pomoPause(taskId: string) {
+		await postAction("pauseTaskPomodoro", { taskId });
 	}
 
-	function pomoDismiss() {
-		if (!focus) return;
-		setFocus({
-			...focus,
-			pomodoro: undefined,
-		});
+	async function pomoResume(taskId: string) {
+		await postAction("resumeTaskPomodoro", { taskId });
 	}
 
-	function logPomodoroToServer() {
-		if (!focus?.pomodoro) return;
-		logFormEl?.requestSubmit();
+	async function pomoReset(taskId: string) {
+		await postAction("resetTaskPomodoro", { taskId });
+	}
+
+	async function pomoAdvance(taskId: string) {
+		await postAction("advanceTaskPomodoro", { taskId });
+	}
+
+	async function pomoStop(taskId: string) {
+		await postAction("stopTaskPomodoro", { taskId });
+	}
+
+	async function pomoDismiss(taskId: string) {
+		await postAction("dismissTaskPomodoro", { taskId });
 	}
 
 	let detailTaskId = $state<string | null>(null);
@@ -492,10 +342,10 @@
 	}
 
 	let createExpanded = $state(false);
-	let showCreateExtras = $derived(!focus || !!editingTodo || createExpanded);
+	let showCreateExtras = $derived(!visibleFocus || !!editingTodo || createExpanded);
 
 	$effect(() => {
-		if (focus) createExpanded = false;
+		if (visibleFocus) createExpanded = false;
 	});
 
 	function openEditForm(todoId: string) {
@@ -617,7 +467,7 @@
 		return session.endedAt - session.startedAt;
 	}
 
-	const sessionLabels: Record<string, string> = { done: 'focused', switch: 'switch', manual: 'idle' };
+	const sessionLabels: Record<string, string> = { done: 'focused', switch: 'switch', manual: 'idle', pause: 'paused' };
 
 	function formatSessionDate(timestamp: number): string {
 		const d = new Date(timestamp);
@@ -714,33 +564,6 @@
 		return groups;
 	});
 
-	let activeTasks = $derived(
-		data.todos.filter((t: { done: boolean }) => !t.done),
-	);
-	let focusedIndex = $derived(
-		focus
-			? activeTasks.findIndex(
-					(t: { id: string }) => t.id === focus!.activeTaskId,
-				)
-			: -1,
-	);
-	let prevTask = $derived(
-		focusedIndex > 0 ? activeTasks[focusedIndex - 1] : null,
-	);
-	let nextTask = $derived(
-		focusedIndex >= 0 && focusedIndex < activeTasks.length - 1
-			? activeTasks[focusedIndex + 1]
-			: null,
-	);
-
-	function focusPrev() {
-		if (prevTask) focusOnTask(prevTask.id);
-	}
-
-	function focusNext() {
-		if (nextTask) focusOnTask(nextTask.id);
-	}
-
 	$effect(() => {
 		syncDetailFromHash();
 		const onHashChange = () => syncDetailFromHash({ restoreFocusOnClose: true });
@@ -766,73 +589,52 @@
 	});
 </script>
 
-<form
-	method="POST"
-	action="?/logPomodoro"
-	use:enhance={() => {
-		return async ({ update }) => {
-			await update({ reset: false, invalidateAll: false });
-		};
-	}}
-	bind:this={logFormEl}
-	hidden
->
-	<input type="hidden" name="taskId" value={focus?.activeTaskId ?? ""} />
-	<input type="hidden" name="type" value={focus?.pomodoro?.type ?? ""} />
-	<input
-		type="hidden"
-		name="duration"
-		value={String(focus?.pomodoro?.duration ?? 0)}
-	/>
-</form>
-
-<form
-	method="POST"
-	action="?/syncFocus"
-	use:enhance={() => {
-		return async ({ update }) => {
-			await update({ reset: false, invalidateAll: false });
-		};
-	}}
-	bind:this={syncFocusFormEl}
-	hidden
->
-	<input type="hidden" name="focus" value={focusJson} />
-</form>
-
-<form
-	method="POST"
-	action="?/focusTask"
-	use:enhance={() => {
-		return async ({ update }) => {
-			await update({ reset: false, invalidateAll: false });
-		};
-	}}
-	bind:this={focusFormEl}
-	hidden
->
-	<input type="hidden" name="taskId" value={focus?.activeTaskId ?? ""} />
-</form>
-
-<form
-	method="POST"
-	action="?/unfocus"
-	use:enhance={() => {
-		return async ({ update }) => {
-			await update({ reset: false, invalidateAll: false });
-		};
-	}}
-	bind:this={unfocusFormEl}
-	hidden
-></form>
-
 <div class="home-layout" class:detail-open={detailOpen}>
 	<main class="main-content">
 			<header class="main-header home-header">
 				<span class="tagline">Todo in your focus</span>
 			</header>
 
-		{#if focus && focusedTodo}
+		{#if collapsedFocusedTasks.length > 0}
+			<section class="focus-stack" aria-label="Focused task stack">
+				{#each collapsedFocusedTasks as task (task.taskId)}
+					{@const taskTodo = data.todos.find((todo) => todo.id === task.taskId)}
+					{#if taskTodo}
+						<div class="focus-stack-row">
+							<button
+								type="button"
+								class="focus-stack-summary"
+								onclick={() => expandTask(task.taskId)}
+								aria-label={`Expand ${taskTodo.title}`}
+							>
+								<span class="focus-stack-timer">
+									{task.pomodoro
+										? formatTime(getDisplayTimer(task, now))
+										: formatElapsed(getDisplayTimer(task, now))}
+								</span>
+								<span class="focus-stack-title">{taskTodo.title}</span>
+							</button>
+							<div class="focus-stack-actions">
+								<button
+									type="button"
+									class="focus-stack-action"
+									onclick={() => toggleTaskRunState(task.taskId)}
+									aria-label={task.sessionStatus === "running" ? "Pause task" : "Resume task"}
+								>{task.sessionStatus === "running" ? "⏸" : "▶"}</button>
+								<button
+									type="button"
+									class="focus-stack-action focus-stack-stop"
+									onclick={() => stopTask(task.taskId)}
+									aria-label="Stop task focus"
+								>■</button>
+							</div>
+						</div>
+					{/if}
+				{/each}
+			</section>
+		{/if}
+
+		{#if expandedFocusedTask && focusedTodo}
 			<section class="hero-focus">
 				<div class="focus-top-bar">
 					<span class="focus-project"
@@ -856,23 +658,7 @@
 							aria-label="Mark task done"
 						></button>
 					</form>
-					{#if prevTask}
-						<button
-							class="focus-nav-btn"
-							onclick={focusPrev}
-							aria-label="Previous task"
-							title={prevTask.title}>&larr;</button
-						>
-					{/if}
 					<h2 class="focus-title">{focusedTodo.title}</h2>
-					{#if nextTask}
-						<button
-							class="focus-nav-btn"
-							onclick={focusNext}
-							aria-label="Next task"
-							title={nextTask.title}>&rarr;</button
-						>
-					{/if}
 					<button
 						class="hero-edit-icon"
 						class:active={editingTaskId === focusedTodo.id}
@@ -882,14 +668,14 @@
 					>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
 					<button
 						class="hero-pause-icon"
-						class:paused={focus?.sessionPaused}
-						onclick={() => focus?.sessionPaused ? resumeSession() : pauseSession()}
-						aria-label={focus?.sessionPaused ? "Resume session" : "Pause session"}
-						title={focus?.sessionPaused ? "Resume session" : "Pause session"}
-					>{focus?.sessionPaused ? '▶' : '⏸'}</button>
+						class:paused={expandedFocusedTask.sessionStatus === "paused"}
+						onclick={() => toggleTaskRunState(expandedFocusedTask.taskId)}
+						aria-label={expandedFocusedTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+						title={expandedFocusedTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+					>{expandedFocusedTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
 					<button
 						class="hero-stop-icon"
-						onclick={unfocusTask}
+						onclick={() => stopTask(expandedFocusedTask.taskId)}
 						aria-label="Stop session"
 						title="Stop session"
 					>■</button>
@@ -919,28 +705,28 @@
 				{/if}
 
 				<div class="focus-bottom">
-					<div class="focus-session" class:paused={focus?.sessionPaused}>
-						<span class="focus-session-label">{focus?.sessionPaused ? 'PAUSED' : 'SESSION'}</span>
+					<div class="focus-session" class:paused={expandedFocusedTask.sessionStatus === "paused"}>
+						<span class="focus-session-label">{expandedFocusedTask.sessionStatus === "paused" ? 'PAUSED' : 'SESSION'}</span>
 						<span class="focus-elapsed"
 							>{formatElapsed(sessionElapsed)}</span
 						>
 					</div>
 
 					<div class="focus-pomodoro">
-						{#if focus.pomodoro}
+						{#if expandedFocusedTask.pomodoro}
 							<div class="pomo-pill" class:expired={pomoExpired}>
 								{#if pomoExpired}
 									<span class="pomo-label">TIME'S UP</span>
-									{#if focus.pomodoro.type === "work"}
+									{#if expandedFocusedTask.pomodoro.type === "work"}
 										<button
 											class="pomo-action"
-											onclick={pomoStartBreak}
+											onclick={() => pomoAdvance(expandedFocusedTask.taskId)}
 											>BREAK</button
 										>
 									{:else}
 										<button
 											class="pomo-action"
-											onclick={pomoStartWork}>WORK</button
+											onclick={() => pomoAdvance(expandedFocusedTask.taskId)}>WORK</button
 										>
 									{/if}
 								{:else}
@@ -948,29 +734,29 @@
 										>{formatTime(pomoRemaining)}</span
 									>
 									<span class="pomo-type">{pomoLabel}</span>
-									{#if focus.pomodoro.paused}
+									{#if expandedFocusedTask.pomodoro.paused}
 										<button
 											class="pomo-action"
-											onclick={pomoResume}>GO</button
+											onclick={() => pomoResume(expandedFocusedTask.taskId)}>GO</button
 										>
 									{:else}
 										<button
 											class="pomo-action"
-											onclick={pomoPause}>PAUSE</button
+											onclick={() => pomoPause(expandedFocusedTask.taskId)}>PAUSE</button
 										>
 									{/if}
 									<button
 										class="pomo-action"
-										onclick={pomoReset}>RESET</button
+										onclick={() => pomoReset(expandedFocusedTask.taskId)}>RESET</button
 									>
 								{/if}
 								<button
 									class="pomo-action pomo-stop"
-									onclick={pomoStop}>STOP</button
+									onclick={() => pomoStop(expandedFocusedTask.taskId)}>STOP</button
 								>
 								<button
 									class="pomo-dismiss"
-									onclick={pomoDismiss}
+									onclick={() => pomoDismiss(expandedFocusedTask.taskId)}
 									aria-label="Dismiss pomodoro"
 									title="Dismiss pomodoro">✕</button
 								>
@@ -986,7 +772,7 @@
 						{:else}
 							<button
 								class="pomo-start-btn"
-								onclick={startPomodoro}>START POMODORO</button
+								onclick={() => startPomodoro(expandedFocusedTask.taskId)}>START POMODORO</button
 							>
 						{/if}
 					</div>
@@ -1268,7 +1054,7 @@
 							onfocus={() => createExpanded = true}
 						/>
 						<button type="submit">ADD</button>
-						{#if focus && !showCreateExtras}
+						{#if visibleFocus && !showCreateExtras}
 							<button type="button" class="create-expand-btn" onclick={() => createExpanded = true} aria-label="Show more options" title="More options">&#9660;</button>
 						{/if}
 					</div>
@@ -1370,10 +1156,10 @@
 								{@const totalFocus = todo.totalFocusMs ?? 0}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-							<li
+								<li
 									class="todo-item"
 									class:done={todo.done}
-									class:active={focus?.activeTaskId === todo.id}
+									class:active={focusedTaskIdSet.has(todo.id)}
 									tabindex="-1"
 									onclick={(e: MouseEvent) => {
 										if ((e.target as HTMLElement)?.closest?.('button, a, select, form')) return;
@@ -1405,7 +1191,7 @@
 											<span class="status-tag urgent"
 												>(OVERDUE)</span
 											>
-										{:else if focus?.activeTaskId === todo.id}
+										{:else if focusedTaskIdSet.has(todo.id)}
 											<span class="status-tag active"
 												>[FOCUSED]</span
 											>
@@ -1413,14 +1199,14 @@
 
 										<button
 											class="todo-title"
-											onclick={(event) => {
+											onclick={async (event) => {
 												if (!todo.done) {
-													if (focus?.activeTaskId === todo.id) {
+													if (focusedTaskIdSet.has(todo.id)) {
 														scrollFocusedHeroIntoView();
-														openDetail(todo.id, event.currentTarget);
+														await expandTask(todo.id);
 													} else {
 														closeDetail();
-														focusOnTask(todo.id);
+														await focusOnTask(todo.id);
 													}
 													return;
 												}
@@ -1446,9 +1232,9 @@
 													>{editingTaskId === todo.id ? 'CLOSE' : 'EDIT'}</button
 												>
 											{/if}
-											{#if !todo.done && focus?.activeTaskId === todo.id}
-												<button onclick={() => unfocusTask()}
-													>PAUSE</button
+											{#if !todo.done && focusedTaskIdSet.has(todo.id)}
+												<button onclick={() => toggleTaskRunState(todo.id)}
+													>{getFocusedTask(visibleFocus, todo.id)?.sessionStatus === "running" ? "PAUSE" : "PLAY"}</button
 												>
 											{/if}
 											{#if todo.done}
@@ -1479,14 +1265,7 @@
 												/>
 												<button
 													type="submit"
-													class="btn-danger"
-													onclick={() => {
-														if (
-															focus?.activeTaskId ===
-															todo.id
-														)
-															unfocusTask();
-													}}>DEL</button
+													class="btn-danger">DEL</button
 												>
 											</form>
 										</div>
@@ -1552,7 +1331,7 @@
 					<div class="detail-badges">
 						{#if detailTodo.done}
 							<span class="detail-badge done">DONE</span>
-						{:else if focus?.activeTaskId === detailTodo.id}
+						{:else if focusedTaskIdSet.has(detailTodo.id)}
 							<span class="detail-badge active">FOCUSED</span>
 						{/if}
 						{#if detailTodo.deadline && !detailTodo.done && isOverdue(detailTodo.deadline)}

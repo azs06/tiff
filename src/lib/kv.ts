@@ -12,6 +12,7 @@ import type {
 	GitHubRepoInfo
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
+import { normalizeFocusState } from './focus';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
 	const data = await kv.get(`todos:${email}`, 'json');
@@ -304,14 +305,15 @@ export async function unarchiveProject(kv: KVNamespace, email: string, id: strin
 
 export async function getFocus(kv: KVNamespace, email: string): Promise<FocusState | null> {
 	const data = await kv.get(`focus:${email}`, 'json');
-	return (data as FocusState) ?? null;
+	return normalizeFocusState((data as FocusState) ?? null);
 }
 
 export async function saveFocus(kv: KVNamespace, email: string, focus: FocusState | null): Promise<void> {
-	if (focus === null) {
+	const normalized = normalizeFocusState(focus);
+	if (normalized === null) {
 		await kv.delete(`focus:${email}`);
 	} else {
-		await kv.put(`focus:${email}`, JSON.stringify(focus));
+		await kv.put(`focus:${email}`, JSON.stringify(normalized));
 	}
 }
 

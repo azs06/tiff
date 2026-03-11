@@ -67,23 +67,40 @@ export interface FocusSession {
 	taskId: string;
 	startedAt: number;
 	endedAt?: number;
-	endReason?: 'switch' | 'done' | 'manual';
+	endReason?: 'switch' | 'done' | 'manual' | 'pause';
+}
+
+export interface FocusPomodoroState {
+	startedAt: number;
+	duration: number;
+	type: 'work' | 'short-break' | 'long-break';
+	completedPomodoros: number;
+	paused: boolean;
+	pausedRemaining?: number;
+}
+
+export interface FocusedTaskState {
+	taskId: string;
+	addedAt: number;
+	lastInteractedAt: number;
+	sessionStatus: 'running' | 'paused';
+	sessionElapsedMs: number;
+	sessionStartedAt?: number;
+	pomodoro?: FocusPomodoroState;
 }
 
 export interface FocusState {
+	expandedTaskId: string | null;
+	tasks: FocusedTaskState[];
+}
+
+export interface LegacyFocusState {
 	activeTaskId: string;
 	focusedAt: number;
 	sessionPaused?: boolean;
 	pausedAt?: number;
 	accumulatedPauseMs?: number;
-	pomodoro?: {
-		startedAt: number;
-		duration: number;
-		type: 'work' | 'short-break' | 'long-break';
-		completedPomodoros: number;
-		paused: boolean;
-		pausedRemaining?: number;
-	};
+	pomodoro?: FocusPomodoroState;
 }
 
 export type Theme = 'signal' | 'paper' | 'nothing';

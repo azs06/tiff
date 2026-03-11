@@ -1,4 +1,22 @@
 import * as d1Store from './d1';
+import {
+	advanceTaskPomodoro,
+	dismissTaskPomodoro,
+	ensureOpenSession,
+	expandFocusedTask,
+	getFocusedTask,
+	normalizeFocusState,
+	pauseFocusedTask,
+	pauseTaskPomodoro,
+	removeFocusedTask,
+	resetTaskPomodoro,
+	resumeFocusedTask,
+	resumeTaskPomodoro,
+	startTaskPomodoro,
+	stopFocusedTask,
+	stopTaskPomodoro,
+	upsertFocusedTask
+} from './focus';
 import * as kvStore from './kv';
 import type {
 	FocusSession,
@@ -58,6 +76,162 @@ function kvOnly<T>(
 	const kv = getKV(env);
 	if (!kv) throw new Error(`KV unavailable for ${op}`);
 	return fn(kv);
+}
+
+type UnifiedStore<TStore extends KVNamespace | D1Database> = {
+	getFocus: (store: TStore, email: string) => Promise<FocusState | null>;
+	saveFocus: (store: TStore, email: string, focus: FocusState | null) => Promise<void>;
+	getSessions: (store: TStore, email: string) => Promise<FocusSession[]>;
+	saveSessions: (store: TStore, email: string, sessions: FocusSession[]) => Promise<void>;
+	getTodos: (store: TStore, email: string) => Promise<Todo[]>;
+	saveTodos: (store: TStore, email: string, todos: Todo[]) => Promise<void>;
+	logPomodoro: (
+		store: TStore,
+		email: string,
+		entry: Omit<PomodoroLog, 'completedAt'>
+	) => Promise<void>;
+	getSettings: (store: TStore, email: string) => Promise<UserSettings>;
+};
+
+function cloneTodos(todos: Todo[]): Todo[] {
+	return todos.map((todo) => ({
+		...todo,
+		logs: todo.logs ? todo.logs.map((log) => ({ ...log })) : undefined
+	}));
+}
+
+function cloneSessions(sessions: FocusSession[]): FocusSession[] {
+	return sessions.map((session) => ({ ...session }));
+}
+
+function updateTodoFocusTotal(todos: Todo[], taskId: string, duration: number) {
+	if (duration <= 0) return;
+	const todo = todos.find((item) => item.id === taskId);
+	if (!todo) return;
+	todo.totalFocusMs = (todo.totalFocusMs ?? 0) + duration;
+}
+
+function closeRunningInterval(
+	sessions: FocusSession[],
+	todos: Todo[],
+	taskId: string,
+	startedAt: number | undefined,
+	reason: FocusSession['endReason'],
+	now: number
+) {
+	const openIndex = [...sessions]
+		.map((session, index) => ({ session, index }))
+		.reverse()
+		.find(({ session }) => session.taskId === taskId && !session.endedAt)?.index;
+
+	if (openIndex !== undefined) {
+		const open = sessions[openIndex];
+		open.endedAt = now;
+		open.endReason = reason;
+		updateTodoFocusTotal(todos, taskId, Math.max(0, now - open.startedAt));
+		return;
+	}
+
+	if (startedAt !== undefined) {
+		sessions.push({
+			id: crypto.randomUUID(),
+			taskId,
+			startedAt,
+			endedAt: now,
+			endReason: reason
+		});
+		updateTodoFocusTotal(todos, taskId, Math.max(0, now - startedAt));
+	}
+}
+
+async function mutateFocusState(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	op: string,
+	mutate: (ctx: {
+		focus: FocusState | null;
+		sessions: FocusSession[];
+		todos: Todo[];
+		settings: UserSettings;
+		now: number;
+	}) => {
+		focus: FocusState | null;
+		sessions: FocusSession[];
+		todos: Todo[];
+		logEntry?: Omit<PomodoroLog, 'completedAt'> | null;
+	}
+): Promise<void> {
+	const kvAdapter: UnifiedStore<KVNamespace> = {
+		getFocus: kvStore.getFocus,
+		saveFocus: kvStore.saveFocus,
+		getSessions: kvStore.getSessions,
+		saveSessions: kvStore.saveSessions,
+		getTodos: kvStore.getTodos,
+		saveTodos: kvStore.saveTodos,
+		logPomodoro: kvStore.logPomodoro,
+		getSettings: kvStore.getSettings
+	};
+	const d1Adapter: UnifiedStore<D1Database> = {
+		getFocus: d1Store.getFocus,
+		saveFocus: d1Store.saveFocus,
+		getSessions: d1Store.getSessions,
+		saveSessions: d1Store.saveSessions,
+		getTodos: d1Store.getTodos,
+		saveTodos: d1Store.saveTodos,
+		logPomodoro: d1Store.logPomodoro,
+		getSettings: d1Store.getSettings
+	};
+
+	await write(
+		env,
+		op,
+		async (kv) => {
+			await mutateFocusStateInStore(kvAdapter, kv, email, mutate);
+		},
+		async (db) => {
+			await mutateFocusStateInStore(d1Adapter, db, email, mutate);
+		}
+	);
+}
+
+async function mutateFocusStateInStore<TStore extends KVNamespace | D1Database>(
+	store: UnifiedStore<TStore>,
+	backend: TStore,
+	email: string,
+	mutate: (ctx: {
+		focus: FocusState | null;
+		sessions: FocusSession[];
+		todos: Todo[];
+		settings: UserSettings;
+		now: number;
+	}) => {
+		focus: FocusState | null;
+		sessions: FocusSession[];
+		todos: Todo[];
+		logEntry?: Omit<PomodoroLog, 'completedAt'> | null;
+	}
+) {
+	const [focus, sessions, todos, settings] = await Promise.all([
+		store.getFocus(backend, email),
+		store.getSessions(backend, email),
+		store.getTodos(backend, email),
+		store.getSettings(backend, email)
+	]);
+
+	const result = mutate({
+		focus: normalizeFocusState(focus),
+		sessions: cloneSessions(sessions),
+		todos: cloneTodos(todos),
+		settings,
+		now: Date.now()
+	});
+
+	await Promise.all([
+		store.saveFocus(backend, email, normalizeFocusState(result.focus)),
+		store.saveSessions(backend, email, result.sessions),
+		store.saveTodos(backend, email, result.todos),
+		result.logEntry ? store.logPomodoro(backend, email, result.logEntry) : Promise.resolve()
+	]);
 }
 
 export function hasAnyStorage(env: App.Platform['env'] | undefined): boolean {
@@ -398,16 +572,80 @@ export async function deleteGitHubInfo(
 }
 
 export async function focusTaskTx(env: App.Platform['env'] | undefined, email: string, taskId: string): Promise<void> {
-	await write(
-		env,
-		'focusTaskTx',
-		async (kv) => {
-			await kvStore.endActiveSession(kv, email, 'switch');
-			await kvStore.startSession(kv, email, taskId);
-			await kvStore.saveFocus(kv, email, { activeTaskId: taskId, focusedAt: Date.now() });
-		},
-		(db) => d1Store.focusTaskTx(db, email, taskId)
-	);
+	await mutateFocusState(env, email, 'focusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		const existing = getFocusedTask(focus, taskId);
+		const nextFocus = upsertFocusedTask(focus, taskId, now);
+		const nextTask = getFocusedTask(nextFocus, taskId);
+		let nextSessions = sessions;
+		if (!existing && nextTask?.sessionStartedAt) {
+			nextSessions = ensureOpenSession(nextSessions, taskId, nextTask.sessionStartedAt);
+		}
+		return { focus: nextFocus, sessions: nextSessions, todos };
+	});
+}
+
+export async function expandFocusTaskTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'expandFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
+		focus: expandFocusedTask(focus, taskId, now),
+		sessions,
+		todos
+	}));
+}
+
+export async function pauseFocusTaskTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'pauseFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		const task = getFocusedTask(focus, taskId);
+		if (task?.sessionStatus === 'running') {
+			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, 'pause', now);
+		}
+		return {
+			focus: pauseFocusedTask(focus, taskId, now),
+			sessions,
+			todos
+		};
+	});
+}
+
+export async function resumeFocusTaskTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'resumeFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		const nextFocus = resumeFocusedTask(focus, taskId, now);
+		const resumed = getFocusedTask(nextFocus, taskId);
+		if (resumed?.sessionStatus === 'running' && resumed.sessionStartedAt) {
+			sessions = ensureOpenSession(sessions, taskId, resumed.sessionStartedAt);
+		}
+		return { focus: nextFocus, sessions, todos };
+	});
+}
+
+export async function stopFocusTaskTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string,
+	reason: FocusSession['endReason'] = 'manual'
+): Promise<void> {
+	await mutateFocusState(env, email, 'stopFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		const task = getFocusedTask(focus, taskId);
+		if (task?.sessionStatus === 'running') {
+			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, reason, now);
+		}
+		return {
+			focus: stopFocusedTask(focus, taskId),
+			sessions,
+			todos
+		};
+	});
 }
 
 export async function unfocusTx(
@@ -415,15 +653,102 @@ export async function unfocusTx(
 	email: string,
 	reason: FocusSession['endReason']
 ): Promise<void> {
-	await write(
-		env,
-		'unfocusTx',
-		async (kv) => {
-			await kvStore.endActiveSession(kv, email, reason);
-			await kvStore.saveFocus(kv, email, null);
-		},
-		(db) => d1Store.unfocusTx(db, email, reason)
-	);
+	await mutateFocusState(env, email, 'unfocusTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		for (const task of focus?.tasks ?? []) {
+			if (task.sessionStatus === 'running') {
+				closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, reason, now);
+			}
+		}
+		return { focus: null, sessions, todos };
+	});
+}
+
+export async function startTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'startTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => ({
+		focus: startTaskPomodoro(focus, taskId, settings, now),
+		sessions,
+		todos
+	}));
+}
+
+export async function pauseTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'pauseTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
+		focus: pauseTaskPomodoro(focus, taskId, now),
+		sessions,
+		todos
+	}));
+}
+
+export async function resumeTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'resumeTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
+		focus: resumeTaskPomodoro(focus, taskId, now),
+		sessions,
+		todos
+	}));
+}
+
+export async function resetTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'resetTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => ({
+		focus: resetTaskPomodoro(focus, taskId, settings, now),
+		sessions,
+		todos
+	}));
+}
+
+export async function advanceTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'advanceTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => {
+		const { focus: nextFocus, logEntry } = advanceTaskPomodoro(focus, taskId, settings, now);
+		return {
+			focus: nextFocus,
+			sessions,
+			todos,
+			logEntry
+		};
+	});
+}
+
+export async function stopTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'stopTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings }) => ({
+		focus: stopTaskPomodoro(focus, taskId),
+		sessions,
+		todos
+	}));
+}
+
+export async function dismissTaskPomodoroTx(
+	env: App.Platform['env'] | undefined,
+	email: string,
+	taskId: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'dismissTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings }) => ({
+		focus: dismissTaskPomodoro(focus, taskId),
+		sessions,
+		todos
+	}));
 }
 
 export async function toggleTodoAndHandleFocusTx(
@@ -431,27 +756,22 @@ export async function toggleTodoAndHandleFocusTx(
 	email: string,
 	id: string
 ): Promise<void> {
-	await write(
-		env,
-		'toggleTodoAndHandleFocusTx',
-		async (kv) => {
-			const todos = await kvStore.getTodos(kv, email);
-			const todo = todos.find((t) => t.id === id);
-			if (!todo) return;
+	await mutateFocusState(env, email, 'toggleTodoAndHandleFocusTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+		const todo = todos.find((task) => task.id === id);
+		if (!todo) return { focus, sessions, todos };
 
-			todo.done = !todo.done;
-			await kvStore.saveTodos(kv, email, todos);
+		todo.done = !todo.done;
 
-			if (todo.done) {
-				const focus = await kvStore.getFocus(kv, email);
-				if (focus?.activeTaskId === id) {
-					await kvStore.endActiveSession(kv, email, 'done');
-					await kvStore.saveFocus(kv, email, null);
-				}
+		if (todo.done) {
+			const focusedTask = getFocusedTask(focus, id);
+			if (focusedTask?.sessionStatus === 'running') {
+				closeRunningInterval(sessions, todos, id, focusedTask.sessionStartedAt, 'done', now);
 			}
-		},
-		(db) => d1Store.toggleTodoAndHandleFocusTx(db, email, id)
-	);
+			focus = removeFocusedTask(focus, id);
+		}
+
+		return { focus, sessions, todos };
+	});
 }
 
 export async function deleteProjectCascadeTx(
