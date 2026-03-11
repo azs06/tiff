@@ -72,6 +72,22 @@
 		return Date.now() > ms;
 	}
 
+	const DETAIL_HISTORY_KEY = "tiffTaskCallout";
+	const FOCUS_ACCORDION_DEFAULT = new Set(["recent"]);
+
+	function parseTaskHash(hash: string): string | null {
+		const match = /^#task\/(.+)$/.exec(hash);
+		return match ? decodeURIComponent(match[1]) : null;
+	}
+
+	function serializeTaskHash(taskId: string): string {
+		return `#task/${encodeURIComponent(taskId)}`;
+	}
+
+	function getPageUrl(hash = ""): string {
+		return `${window.location.pathname}${window.location.search}${hash}`;
+	}
+
 	let focus = $state<FocusState | null>(null);
 	let syncFocusFormEl: HTMLFormElement;
 	let focusFormEl: HTMLFormElement;
@@ -385,8 +401,9 @@
 	}
 
 	let detailTaskId = $state<string | null>(null);
-	let detailVisible = $state(false);
-	let detailOpen = $derived(detailTaskId !== null && detailVisible);
+	let detailOpenedFromSession = $state(false);
+	let detailCloseButton = $state<HTMLButtonElement | null>(null);
+	let lastDetailTrigger: HTMLElement | null = null;
 
 	let detailTodo = $derived(
 		detailTaskId
@@ -395,6 +412,66 @@
 				) ?? null)
 			: null,
 	);
+	let detailOpen = $derived(detailTodo !== null);
+
+	function hasKnownTask(taskId: string | null): taskId is string {
+		return !!taskId && [...data.todos, ...data.archivedTodos].some((t) => t.id === taskId);
+	}
+
+	function syncDetailFromHash(options?: { restoreFocusOnClose?: boolean }) {
+		const restoreFocusOnClose = options?.restoreFocusOnClose ?? false;
+		const previousTaskId = detailTaskId;
+		const nextTaskId = parseTaskHash(window.location.hash);
+		detailTaskId = hasKnownTask(nextTaskId) ? nextTaskId : null;
+		detailOpenedFromSession = Boolean(window.history.state?.[DETAIL_HISTORY_KEY]);
+		if (restoreFocusOnClose && previousTaskId && !detailTaskId) {
+			restoreDetailTriggerFocus();
+		}
+	}
+
+	function rememberDetailTrigger(trigger?: EventTarget | null) {
+		if (trigger instanceof HTMLElement) {
+			lastDetailTrigger = trigger;
+		}
+	}
+
+	function restoreDetailTriggerFocus() {
+		const nextFocusTarget = lastDetailTrigger;
+		lastDetailTrigger = null;
+		if (!nextFocusTarget) return;
+		tick().then(() => {
+			nextFocusTarget.focus();
+		});
+	}
+
+	function openDetail(todoId: string, trigger?: EventTarget | null) {
+		if (!hasKnownTask(todoId)) return;
+		rememberDetailTrigger(trigger);
+		const nextHash = serializeTaskHash(todoId);
+		if (window.location.hash === nextHash && detailTaskId === todoId) return;
+		const nextState = { ...(window.history.state ?? {}), [DETAIL_HISTORY_KEY]: true };
+		if (detailOpen) {
+			window.history.replaceState(nextState, "", getPageUrl(nextHash));
+		} else {
+			window.history.pushState(nextState, "", getPageUrl(nextHash));
+		}
+		detailTaskId = todoId;
+		detailOpenedFromSession = true;
+	}
+
+	function closeDetail(options?: { restoreFocus?: boolean }) {
+		if (!detailOpen) return;
+		const restoreFocus = options?.restoreFocus ?? true;
+		if (restoreFocus) restoreDetailTriggerFocus();
+		if (detailOpenedFromSession && window.history.state?.[DETAIL_HISTORY_KEY]) {
+			window.history.back();
+			return;
+		}
+		const nextState = { ...(window.history.state ?? {}) };
+		delete nextState[DETAIL_HISTORY_KEY];
+		window.history.replaceState(nextState, "", getPageUrl());
+		syncDetailFromHash();
+	}
 
 	let editingTaskId = $state<string | null>(null);
 	let editingTodo = $derived(
@@ -467,32 +544,10 @@
 		});
 	}
 
-	function openDetail(todoId: string) {
-		detailTaskId = todoId;
-		detailVisible = true;
-	}
-
-	function closeDetail() {
-		detailVisible = false;
-	}
-
-	function toggleDetail() {
-		if (detailOpen) {
-			detailVisible = false;
-		} else if (detailTaskId) {
-			detailVisible = true;
-		}
-	}
-
 	$effect(() => {
-		if (
-			detailTaskId &&
-			![...data.todos, ...data.archivedTodos].some(
-				(t) => t.id === detailTaskId,
-			)
-		) {
-			detailTaskId = null;
-		}
+		if (!detailTaskId) return;
+		if (hasKnownTask(detailTaskId)) return;
+		closeDetail({ restoreFocus: false });
 	});
 
 	$effect(() => {
@@ -612,6 +667,32 @@
 			? getTaskSessions(focusedTodo.id).at(-1) ?? null
 			: null,
 	);
+	let focusedSessions = $derived(
+		focusedTodo ? getTaskSessions(focusedTodo.id) : [],
+	);
+	let focusedPomodoros = $derived(
+		focusedTodo ? getTaskPomodoros(focusedTodo.id) : [],
+	);
+	let focusedLogCount = $derived(focusedTodo?.logs?.length ?? 0);
+	let focusAccordionTaskId = $state<string | null>(null);
+	let openFocusAccordions = $state(new Set<string>());
+
+	$effect(() => {
+		const nextTaskId = focusedTodo?.id ?? null;
+		if (focusAccordionTaskId === nextTaskId) return;
+		focusAccordionTaskId = nextTaskId;
+		openFocusAccordions = nextTaskId ? new Set(FOCUS_ACCORDION_DEFAULT) : new Set();
+	});
+
+	function toggleFocusAccordion(section: string) {
+		const next = new Set(openFocusAccordions);
+		if (next.has(section)) {
+			next.delete(section);
+		} else {
+			next.add(section);
+		}
+		openFocusAccordions = next;
+	}
 
 	let todoGroups = $derived(() => {
 		const groups: { name: string; todos: typeof data.todos }[] = [];
@@ -659,6 +740,30 @@
 	function focusNext() {
 		if (nextTask) focusOnTask(nextTask.id);
 	}
+
+	$effect(() => {
+		syncDetailFromHash();
+		const onHashChange = () => syncDetailFromHash({ restoreFocusOnClose: true });
+		window.addEventListener("hashchange", onHashChange);
+		return () => window.removeEventListener("hashchange", onHashChange);
+	});
+
+	$effect(() => {
+		if (!detailOpen) return;
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		tick().then(() => detailCloseButton?.focus());
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			closeDetail();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.body.style.overflow = previousOverflow;
+			window.removeEventListener("keydown", onKeyDown);
+		};
+	});
 </script>
 
 <form
@@ -722,42 +827,9 @@
 ></form>
 
 <div class="home-layout" class:detail-open={detailOpen}>
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="detail-overlay"
-		class:visible={detailOpen}
-		onclick={closeDetail}
-		onkeydown={(e) => {
-			if (e.key === "Escape") closeDetail();
-		}}
-	></div>
-
 	<main class="main-content">
 			<header class="main-header home-header">
 				<span class="tagline">Todo in your focus</span>
-				{#if detailTaskId || focus?.activeTaskId}
-					<button
-						type="button"
-						class="toggle-detail-btn"
-						class:open={detailOpen}
-						onclick={() => {
-							const taskId = detailTaskId ?? focus?.activeTaskId ?? null;
-							if (taskId) {
-								if (detailTaskId === taskId && detailVisible) {
-									detailVisible = false;
-								} else {
-									detailTaskId = taskId;
-									detailVisible = true;
-								}
-							}
-						}}
-						aria-label={detailOpen ? "Hide history panel" : "Show history panel"}
-						aria-expanded={detailOpen}
-						title={detailOpen ? "Hide history" : "Show history"}
-					>
-						<span class="toggle-detail-btn-icon" aria-hidden="true"></span>
-					</button>
-				{/if}
 			</header>
 
 		{#if focus && focusedTodo}
@@ -844,7 +916,6 @@
 							</div>
 						{/if}
 					</div>
-					<button type="button" class="focus-view-logs" onclick={() => openDetail(focusedTodo.id)}>VIEW DETAILS &rsaquo;</button>
 				{/if}
 
 				<div class="focus-bottom">
@@ -921,6 +992,12 @@
 					</div>
 				</div>
 
+				<button
+					type="button"
+					class="focus-view-logs"
+					onclick={(event) => openDetail(focusedTodo.id, event.currentTarget)}
+				>OPEN TASK SHEET &rsaquo;</button>
+
 				<form
 					class="focus-log-form"
 					method="POST"
@@ -946,6 +1023,114 @@
 					></textarea>
 					<button type="submit">LOG</button>
 				</form>
+
+				<div class="focus-inline-details" aria-label="Focused task quick details">
+					<section class="focus-accordion" class:open={openFocusAccordions.has("recent")}>
+						<button
+							type="button"
+							class="focus-accordion-toggle"
+							onclick={() => toggleFocusAccordion("recent")}
+							aria-expanded={openFocusAccordions.has("recent")}
+						>
+							<span class="focus-accordion-title">Recent activity</span>
+							<span class="focus-accordion-summary">
+								{#if focusedLastLog && focusedLastSession}
+									log + session
+								{:else if focusedLastLog}
+									latest log
+								{:else if focusedLastSession}
+									latest session
+								{:else}
+									no recent activity
+								{/if}
+							</span>
+						</button>
+						{#if openFocusAccordions.has("recent")}
+							<div class="focus-accordion-body">
+								{#if focusedLastLog}
+									<div class="focus-inline-row">
+										<span class="focus-inline-label">LOG</span>
+										<div class="focus-inline-copy">
+											<div class="focus-inline-heading">{relativeTime(focusedLastLog.createdAt)}</div>
+											<p>{focusedLastLog.text}</p>
+										</div>
+									</div>
+								{/if}
+								{#if focusedLastSession}
+									<div class="focus-inline-row">
+										<span class="focus-inline-label">SESSION</span>
+										<div class="focus-inline-copy">
+											<div class="focus-inline-heading">{formatSessionDate(focusedLastSession.startedAt)}</div>
+											<p>{formatDuration(sessionDuration(focusedLastSession))} ended {sessionLabels[focusedLastSession.endReason ?? "manual"] ?? focusedLastSession.endReason ?? "manual"}</p>
+										</div>
+									</div>
+								{/if}
+								{#if !focusedLastLog && !focusedLastSession}
+									<div class="focus-inline-empty">No completed sessions or logs yet for this task.</div>
+								{/if}
+							</div>
+						{/if}
+					</section>
+
+					<section class="focus-accordion" class:open={openFocusAccordions.has("sessions")}>
+						<button
+							type="button"
+							class="focus-accordion-toggle"
+							onclick={() => toggleFocusAccordion("sessions")}
+							aria-expanded={openFocusAccordions.has("sessions")}
+						>
+							<span class="focus-accordion-title">Session summary</span>
+							<span class="focus-accordion-summary">{formatDuration(focusedTodo.totalFocusMs ?? 0)} across {focusedSessions.length} session{focusedSessions.length !== 1 ? "s" : ""}</span>
+						</button>
+						{#if openFocusAccordions.has("sessions")}
+							<div class="focus-accordion-body">
+								<div class="focus-stat-grid">
+									<div class="focus-stat">
+										<span class="focus-stat-label">Total</span>
+										<strong>{formatDuration(focusedTodo.totalFocusMs ?? 0)}</strong>
+									</div>
+									<div class="focus-stat">
+										<span class="focus-stat-label">Sessions</span>
+										<strong>{focusedSessions.length}</strong>
+									</div>
+									<div class="focus-stat">
+										<span class="focus-stat-label">Last end</span>
+										<strong>{focusedLastSession ? formatSessionDate(focusedLastSession.startedAt) : "None"}</strong>
+									</div>
+									<div class="focus-stat">
+										<span class="focus-stat-label">Pomodoros</span>
+										<strong>{focusedPomodoros.length}</strong>
+									</div>
+								</div>
+							</div>
+						{/if}
+					</section>
+
+					<section class="focus-accordion" class:open={openFocusAccordions.has("notes")}>
+						<button
+							type="button"
+							class="focus-accordion-toggle"
+							onclick={() => toggleFocusAccordion("notes")}
+							aria-expanded={openFocusAccordions.has("notes")}
+						>
+							<span class="focus-accordion-title">Notes</span>
+							<span class="focus-accordion-summary">{focusedTodo.detail ? "1 note" : "no note"} · {focusedLogCount} log{focusedLogCount !== 1 ? "s" : ""}</span>
+						</button>
+						{#if openFocusAccordions.has("notes")}
+							<div class="focus-accordion-body">
+								{#if focusedTodo.detail}
+									<p class="focus-inline-note">{focusedTodo.detail}</p>
+								{:else}
+									<div class="focus-inline-empty">No persistent notes on this task yet.</div>
+								{/if}
+								<div class="focus-inline-meta">
+									<span>{focusedLogCount} log{focusedLogCount !== 1 ? "s" : ""}</span>
+									<span>{focusedPomodoros.length} pomo{focusedPomodoros.length !== 1 ? "s" : ""}</span>
+								</div>
+							</div>
+						{/if}
+					</section>
+				</div>
 			</section>
 		{/if}
 
@@ -1189,9 +1374,10 @@
 									class="todo-item"
 									class:done={todo.done}
 									class:active={focus?.activeTaskId === todo.id}
+									tabindex="-1"
 									onclick={(e: MouseEvent) => {
 										if ((e.target as HTMLElement)?.closest?.('button, a, select, form')) return;
-										openDetail(todo.id);
+										openDetail(todo.id, e.currentTarget);
 									}}
 								>
 									<div class="todo-row">
@@ -1227,18 +1413,18 @@
 
 										<button
 											class="todo-title"
-											onclick={() => {
+											onclick={(event) => {
 												if (!todo.done) {
 													if (focus?.activeTaskId === todo.id) {
 														scrollFocusedHeroIntoView();
-														openDetail(todo.id);
+														openDetail(todo.id, event.currentTarget);
 													} else {
 														closeDetail();
 														focusOnTask(todo.id);
 													}
 													return;
 												}
-												openDetail(todo.id);
+												openDetail(todo.id, event.currentTarget);
 											}}>{todo.title}</button
 										>
 
@@ -1345,10 +1531,24 @@
 	{#if detailTodo}
 		{@const detailPomodoros = getTaskPomodoros(detailTodo.id)}
 		{@const detailSessions = getTaskSessions(detailTodo.id)}
-		<aside class="detail-panel" class:open={detailOpen}>
+		{@const detailHasDetail = Boolean(detailTodo.detail)}
+		{@const detailHasSessions = detailSessions.length > 0 || (detailTodo.totalFocusMs ?? 0) > 0}
+		{@const detailHasPomodoros = detailPomodoros.length > 0}
+		{@const detailHasLogs = (detailTodo.logs?.length ?? 0) > 0}
+		{@const detailHasContent = detailHasDetail || detailHasSessions || detailHasPomodoros || detailHasLogs}
+		{@const detailSectionCount = Number(detailHasDetail) + Number(detailHasSessions) + Number(detailHasPomodoros) + Number(detailHasLogs)}
+		{@const detailSparseState = detailHasContent && detailSectionCount <= 2}
+		<div class="detail-overlay visible" aria-hidden="true" onclick={() => closeDetail({ restoreFocus: false })}></div>
+		<div
+			class="detail-panel"
+			class:open={detailOpen}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="detail-title"
+		>
 			<div class="detail-header">
 				<div class="detail-header-info">
-					<div class="detail-title">{detailTodo.title}</div>
+					<div class="detail-title" id="detail-title">{detailTodo.title}</div>
 					<div class="detail-badges">
 						{#if detailTodo.done}
 							<span class="detail-badge done">DONE</span>
@@ -1360,17 +1560,45 @@
 						{/if}
 					</div>
 				</div>
-				<button class="detail-close" onclick={closeDetail}>✕</button>
+				<button bind:this={detailCloseButton} class="detail-close" onclick={() => closeDetail()}>✕</button>
 			</div>
 
-			{#if detailTodo.detail}
+			{#if !detailHasContent}
+				<div class="detail-empty">
+					<div class="detail-empty-illustration" aria-hidden="true">
+						<svg viewBox="0 0 220 220" class="coffee-cup-art">
+							<defs>
+								<linearGradient id="coffeeGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+									<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.9" />
+									<stop offset="100%" stop-color="var(--accent-dark)" stop-opacity="0.45" />
+								</linearGradient>
+							</defs>
+							<path class="coffee-steam coffee-steam--1" d="M86 72c-8-15 8-18 0-34" />
+							<path class="coffee-steam coffee-steam--2" d="M110 64c-10-18 10-22 0-40" />
+							<path class="coffee-steam coffee-steam--3" d="M136 72c-7-14 7-19 0-33" />
+							<ellipse class="coffee-shadow" cx="110" cy="176" rx="54" ry="12" />
+							<path class="coffee-saucer" d="M52 166h116" />
+							<path class="coffee-cup" d="M66 98h88v44c0 17-13 30-30 30H96c-17 0-30-13-30-30z" />
+							<path class="coffee-fill" d="M74 102h72v26H74z" />
+							<path class="coffee-rim" d="M70 98h80" />
+							<path class="coffee-handle" d="M154 112h10c12 0 20 9 20 20s-8 20-20 20h-10" />
+						</svg>
+					</div>
+					<div class="detail-empty-copy">
+						<div class="detail-section-title">Task sheet warming up</div>
+						<p>No notes, sessions, pomodoros, or logs yet. Let this one simmer and come back once the work starts leaving a trail.</p>
+					</div>
+				</div>
+			{/if}
+
+			{#if detailHasDetail}
 				<div class="detail-section">
 					<div class="detail-section-title">DETAILS</div>
 					<p class="detail-text-readonly">{detailTodo.detail}</p>
 				</div>
 			{/if}
 
-			{#if detailSessions.length > 0 || (detailTodo.totalFocusMs ?? 0) > 0}
+			{#if detailHasSessions}
 				<div class="detail-section">
 					<div class="detail-section-title">SESSIONS</div>
 					<div class="session-summary">
@@ -1410,7 +1638,7 @@
 				</div>
 			{/if}
 
-			{#if detailPomodoros.length > 0}
+			{#if detailHasPomodoros}
 				<div class="detail-section">
 					<div class="detail-section-title">POMODOROS</div>
 					<div class="time-summary">
@@ -1427,11 +1655,11 @@
 				</div>
 			{/if}
 
-			{#if detailTodo.logs && detailTodo.logs.length > 0}
+			{#if detailHasLogs}
 				<div class="detail-section">
 					<div class="detail-section-title">ACTIVITY LOG</div>
 					<div class="log-list">
-						{#each [...detailTodo.logs].reverse() as log (log.id)}
+						{#each [...(detailTodo.logs ?? [])].reverse() as log (log.id)}
 							<div class="log-entry">
 								<div class="log-entry-header">
 									<span class="log-time"
@@ -1465,6 +1693,39 @@
 					</div>
 				</div>
 			{/if}
-		</aside>
+
+			{#if detailSparseState}
+				<div class="detail-sparse-state">
+					<div class="detail-empty-illustration detail-empty-illustration--sparse" aria-hidden="true">
+						<svg viewBox="0 0 320 220" class="task-sheet-art">
+							<defs>
+								<linearGradient id="taskSheetGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+									<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.9" />
+									<stop offset="100%" stop-color="var(--accent-dark)" stop-opacity="0.25" />
+								</linearGradient>
+							</defs>
+							<ellipse class="task-sheet-shadow" cx="168" cy="184" rx="98" ry="18" />
+							<path class="task-sheet-gear-outer" d="M92 108l-10-6 6-10-7-12 9-8-2-12 12-2 3-12 12 2 8-10 10 6 10-6 8 10 12-2 3 12 12 2-2 12 9 8-7 12 6 10-10 6v12l-12 3-3 12-12-2-8 10-10-6-10 6-8-10-12 2-3-12-12-3z" />
+							<circle class="task-sheet-gear-inner" cx="114" cy="96" r="25" />
+							<circle class="task-sheet-gear-core" cx="114" cy="96" r="8" />
+							<g class="task-sheet-page">
+								<path class="task-sheet-panel" d="M146 44h94l32 30v100H146z" />
+								<path class="task-sheet-fold" d="M240 44v30h32" />
+								<rect class="task-sheet-tab" x="166" y="64" width="62" height="14" rx="3" />
+								<path class="task-sheet-line" d="M166 98h86" />
+								<path class="task-sheet-line" d="M166 120h86" />
+								<path class="task-sheet-line" d="M166 142h64" />
+								<path class="task-sheet-line task-sheet-line--accent" d="M166 164h50" />
+							</g>
+							<path class="task-sheet-link" d="M138 112c14 0 18 12 28 12" />
+						</svg>
+					</div>
+					<div class="detail-empty-copy">
+						<div class="detail-section-title">Task sheet in motion</div>
+						<p>Some signals are already coming through. Keep adding notes, logs, or pomodoros and this sheet will fill out instead of idling on one section.</p>
+					</div>
+				</div>
+			{/if}
+		</div>
 	{/if}
 </div>

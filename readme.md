@@ -10,6 +10,7 @@ npm run dev
 ```
 
 `src/hooks.server.ts` bypasses Cloudflare Access in local/dev runtime and uses `dev@localhost`.
+`npm run dev` now auto-applies pending local D1 migrations before starting Vite.
 
 ## Deploy
 
