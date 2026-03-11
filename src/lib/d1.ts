@@ -300,7 +300,7 @@ export async function getTimer(_db: D1Database, _email: string): Promise<TimerSt
 }
 
 export async function saveTimer(_db: D1Database, _email: string, _timer: TimerState | null): Promise<void> {
-	// Legacy timer state stays in KV during migration.
+	// Legacy timer state remains in KV for backward compatibility.
 }
 
 export async function logPomodoro(

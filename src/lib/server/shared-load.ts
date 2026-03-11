@@ -14,13 +14,9 @@ import {
 } from '$lib/storage';
 import { DEFAULT_SETTINGS, type FocusState, type GitHubRepoInfo } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, isCacheFresh } from '$lib/github';
-import { getLatestMigrationRun } from '$lib/server/migrations';
 
 export async function loadAppData(locals: App.Locals, platform: App.Platform | undefined) {
 	const env = platform?.env;
-	const migrationEnabled = Boolean(env?.TIFF_DB && env?.TIFF_KV && env?.MIGRATION_ADMIN_TOKEN);
-	const latestMigrationRun =
-		env?.TIFF_DB && migrationEnabled ? await getLatestMigrationRun(env.TIFF_DB) : null;
 
 	if (!hasAnyStorage(env)) {
 		return {
@@ -33,18 +29,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 			archivedProjects: [],
 			sessions: [],
 			githubInfo: {} as Record<string, GitHubRepoInfo>,
-			hasGithubToken: false,
-			migrationStatus: {
-				enabled: migrationEnabled,
-				runId: null,
-				status: 'idle' as const,
-				startedAt: null,
-				finishedAt: null,
-				totalUsers: 0,
-				processedUsers: 0,
-				mismatchedUsers: 0,
-				notes: null
-			}
+			hasGithubToken: false
 		};
 	}
 
@@ -60,7 +45,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 		getSessions(env, email)
 	]);
 
-	// Migration: convert old TimerState to FocusState
+	// Legacy compatibility: convert old TimerState records into FocusState on first read.
 	let focus = serverFocus;
 	if (!focus) {
 		const oldTimer = await getTimer(env, email);
@@ -148,17 +133,6 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 		archivedProjects,
 		sessions,
 		githubInfo,
-		hasGithubToken: Boolean(githubToken),
-		migrationStatus: {
-			enabled: migrationEnabled,
-			runId: latestMigrationRun?.runId ?? null,
-			status: latestMigrationRun?.status ?? ('idle' as const),
-			startedAt: latestMigrationRun?.startedAt ?? null,
-			finishedAt: latestMigrationRun?.finishedAt ?? null,
-			totalUsers: latestMigrationRun?.totalUsers ?? 0,
-			processedUsers: latestMigrationRun?.processedUsers ?? 0,
-			mismatchedUsers: latestMigrationRun?.mismatchedUsers ?? 0,
-			notes: latestMigrationRun?.notes ?? null
-		}
+		hasGithubToken: Boolean(githubToken)
 	};
 }
