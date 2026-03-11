@@ -547,28 +547,28 @@ export async function startSession(env: App.Platform['env'] | undefined, email: 
 export async function getGitHubInfo(
 	env: App.Platform['env'] | undefined,
 	email: string,
-	projectId: string
+	repoLinkId: string
 ): Promise<GitHubRepoInfo | null> {
 	const kv = getKV(env);
 	if (!kv) return null;
-	return kvStore.getGitHubInfo(kv, email, projectId);
+	return kvStore.getGitHubInfo(kv, email, repoLinkId);
 }
 
 export async function saveGitHubInfo(
 	env: App.Platform['env'] | undefined,
 	email: string,
-	projectId: string,
+	repoLinkId: string,
 	info: GitHubRepoInfo
 ): Promise<void> {
-	await kvOnly(env, 'saveGitHubInfo', (kv) => kvStore.saveGitHubInfo(kv, email, projectId, info));
+	await kvOnly(env, 'saveGitHubInfo', (kv) => kvStore.saveGitHubInfo(kv, email, repoLinkId, info));
 }
 
 export async function deleteGitHubInfo(
 	env: App.Platform['env'] | undefined,
 	email: string,
-	projectId: string
+	repoLinkId: string
 ): Promise<void> {
-	await kvOnly(env, 'deleteGitHubInfo', (kv) => kvStore.deleteGitHubInfo(kv, email, projectId));
+	await kvOnly(env, 'deleteGitHubInfo', (kv) => kvStore.deleteGitHubInfo(kv, email, repoLinkId));
 }
 
 export async function focusTaskTx(env: App.Platform['env'] | undefined, email: string, taskId: string): Promise<void> {

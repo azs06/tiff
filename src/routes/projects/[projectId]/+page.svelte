@@ -2,7 +2,11 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
-	import type { GitHubRepoInfo } from '$lib/types';
+	import {
+		getPrimaryProjectGitHubRepo,
+		type GitHubRepoInfo,
+		type ProjectGitHubRepo
+	} from '$lib/types';
 
 	let { data }: { data: PageData } = $props();
 
@@ -15,8 +19,19 @@
 			: []
 	);
 
-	let ghInfo: GitHubRepoInfo | undefined = $derived(
-		project ? data.githubInfo[project.id] : undefined
+	let githubRepos = $derived(
+		project
+			? [...(project.githubRepos ?? [])].sort((a, b) => {
+					if (a.isPrimary !== b.isPrimary) return Number(b.isPrimary) - Number(a.isPrimary);
+					return a.createdAt - b.createdAt;
+				})
+			: []
+	);
+	let primaryRepo: ProjectGitHubRepo | undefined = $derived(
+		project ? getPrimaryProjectGitHubRepo(project) : undefined
+	);
+	let primaryGhInfo: GitHubRepoInfo | undefined = $derived(
+		primaryRepo ? data.githubInfo[primaryRepo.id] : undefined
 	);
 
 	function getDomainLabel(url: string): string {
@@ -44,6 +59,26 @@
 		if (hours < 24) return `${hours}h ago`;
 		const days = Math.floor(hours / 24);
 		return `${days}d ago`;
+	}
+
+	function getRepoInfo(repoLinkId: string): GitHubRepoInfo | undefined {
+		return data.githubInfo[repoLinkId];
+	}
+
+	function downloadReadme(repo: ProjectGitHubRepo, info: GitHubRepoInfo): void {
+		if (!info.readmeContent) return;
+		const blob = new Blob([info.readmeContent], { type: 'text/markdown' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `${repo.repo || 'readme'}.md`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+	function copyReadme(info: GitHubRepoInfo): void {
+		if (!info.readmeContent) return;
+		navigator.clipboard.writeText(info.readmeContent);
 	}
 </script>
 
@@ -115,12 +150,146 @@
 				<div class="project-card-section">
 					<div class="sidebar-panel-title">GITHUB</div>
 					{#if !data.hasGithubToken}
-						<div class="settings-hint">GitHub integration not configured.</div>
-					{:else if !project.githubRepo}
+						<div class="settings-hint">GitHub integration not configured. Linked repos remain visible, but sync is unavailable.</div>
+					{/if}
+					{#if primaryRepo}
+						<div class="github-info">
+							<div class="github-stat-row">
+								<span class="github-stat-label">PRIMARY</span>
+								<a href={`https://github.com/${primaryRepo.fullName}`} target="_blank" rel="noopener noreferrer">
+									{primaryRepo.fullName}
+								</a>
+							</div>
+							{#if primaryGhInfo?.error}
+								<div class="github-error">{primaryGhInfo.error}</div>
+							{/if}
+							{#if primaryGhInfo && !primaryGhInfo.error}
+								<div class="github-stats">
+									{#if primaryGhInfo.description}
+										<div class="github-stat-row">
+											<span class="github-stat-label">ABOUT</span>
+											<span>{primaryGhInfo.description}</span>
+										</div>
+									{/if}
+									<div class="github-stat-row">
+										<span class="github-stat-label">BRANCH</span>
+										<span>{primaryGhInfo.defaultBranch}</span>
+									</div>
+									{#if primaryGhInfo.lastPushedAt}
+										<div class="github-stat-row">
+											<span class="github-stat-label">PUSHED</span>
+											<span>{formatRelativeTime(primaryGhInfo.lastPushedAt)}</span>
+										</div>
+									{/if}
+									<div class="github-stat-row">
+										<span class="github-stat-label">STARS</span>
+										<span>{primaryGhInfo.stars}</span>
+									</div>
+									<div class="github-stat-row">
+										<span class="github-stat-label">ISSUES</span>
+										<span>{primaryGhInfo.openIssueCount} open</span>
+									</div>
+									{#if primaryGhInfo.lastMergedPr}
+										<div class="github-stat-row">
+											<span class="github-stat-label">LAST PR</span>
+											<a href={primaryGhInfo.lastMergedPr.url} target="_blank" rel="noopener noreferrer">
+												#{primaryGhInfo.lastMergedPr.number} {primaryGhInfo.lastMergedPr.title}
+											</a>
+										</div>
+									{/if}
+									<div class="github-stat-row">
+										<span class="github-stat-label">CACHED</span>
+										<span>{formatRelativeTime(primaryGhInfo.fetchedAt)}</span>
+									</div>
+									<div class="github-stat-row">
+										<span class="github-stat-label">README</span>
+										<span class="github-readme-actions">
+											{#if primaryGhInfo.readmeUpdatedAt}
+												updated {formatRelativeTime(primaryGhInfo.readmeUpdatedAt)} ·
+											{:else if primaryGhInfo.readmeFetchedAt}
+												synced {formatRelativeTime(primaryGhInfo.readmeFetchedAt)} ·
+											{:else}
+												not synced yet ·
+											{/if}
+											{#if data.hasGithubToken}
+												<form method="POST" action="?/syncProjectReadmeFromPrimary" use:enhance style="display:inline">
+													<input type="hidden" name="projectId" value={project.id} />
+													<button type="submit">sync</button>
+												</form>
+											{:else}
+												sync unavailable
+											{/if}
+											{#if primaryGhInfo.readmeContent}
+												· <button type="button" onclick={() => primaryRepo && downloadReadme(primaryRepo, primaryGhInfo)}>download</button>
+												· <button type="button" onclick={() => primaryGhInfo && copyReadme(primaryGhInfo)}>copy</button>
+											{/if}
+										</span>
+									</div>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="settings-hint">No GitHub repos linked yet.</div>
+					{/if}
+
+					{#if project.githubRepos && project.githubRepos.length > 0}
+						<div class="github-repo-list">
+							{#each githubRepos as repo (repo.id)}
+								{@const info = getRepoInfo(repo.id)}
+								<div class="github-repo-card">
+									<div class="github-repo-card-head">
+										<a href={`https://github.com/${repo.fullName}`} target="_blank" rel="noopener noreferrer">
+											{repo.fullName}
+										</a>
+										{#if repo.isPrimary}
+											<span class="resource-label">PRIMARY</span>
+										{/if}
+									</div>
+									<div class="github-repo-card-meta">
+										{#if info?.error}
+											<span class="github-error">{info.error}</span>
+										{:else if info}
+											<span>{info.defaultBranch}</span>
+											{#if info.lastPushedAt}
+												<span>pushed {formatRelativeTime(info.lastPushedAt)}</span>
+											{/if}
+											<span>{info.stars} stars</span>
+											<span>{info.openIssueCount} open issues</span>
+										{:else}
+											<span>No cached GitHub data yet.</span>
+										{/if}
+									</div>
+									<div class="github-actions">
+										{#if data.hasGithubToken}
+											<form method="POST" action="?/syncProjectGithubRepo" use:enhance>
+												<input type="hidden" name="projectId" value={project.id} />
+												<input type="hidden" name="repoLinkId" value={repo.id} />
+												<button type="submit">SYNC</button>
+											</form>
+										{/if}
+										{#if !repo.isPrimary}
+											<form method="POST" action="?/setPrimaryProjectGithubRepo" use:enhance>
+												<input type="hidden" name="projectId" value={project.id} />
+												<input type="hidden" name="repoLinkId" value={repo.id} />
+												<button type="submit">MAKE PRIMARY</button>
+											</form>
+										{/if}
+										<form method="POST" action="?/removeProjectGithubRepo" use:enhance>
+											<input type="hidden" name="projectId" value={project.id} />
+											<input type="hidden" name="repoLinkId" value={repo.id} />
+											<button type="submit" class="btn-danger">REMOVE</button>
+										</form>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					{#if data.hasGithubToken}
 						<form
 							class="detail-form"
 							method="POST"
-							action="?/linkGithub"
+							action="?/addProjectGithubRepo"
 							use:enhance={() => {
 								return async ({ update }) => {
 									await update({ reset: true });
@@ -129,100 +298,8 @@
 						>
 							<input type="hidden" name="projectId" value={project.id} />
 							<input type="text" name="repo" placeholder="owner/repo or GitHub URL" required />
-							<button type="submit">LINK REPO</button>
+							<button type="submit">ADD REPO</button>
 						</form>
-					{:else}
-						<div class="github-info">
-							{#if ghInfo?.error}
-								<div class="github-error">{ghInfo.error}</div>
-							{/if}
-							<div class="github-stats">
-								<div class="github-stat-row">
-									<span class="github-stat-label">REPO</span>
-									<a href={`https://github.com/${project.githubRepo}`} target="_blank" rel="noopener noreferrer">
-										{project.githubRepo}
-									</a>
-								</div>
-								{#if ghInfo && !ghInfo.error}
-									{#if ghInfo.description}
-										<div class="github-stat-row">
-											<span class="github-stat-label">ABOUT</span>
-											<span>{ghInfo.description}</span>
-										</div>
-									{/if}
-									<div class="github-stat-row">
-										<span class="github-stat-label">BRANCH</span>
-										<span>{ghInfo.defaultBranch}</span>
-									</div>
-									{#if ghInfo.lastPushedAt}
-										<div class="github-stat-row">
-											<span class="github-stat-label">PUSHED</span>
-											<span>{formatRelativeTime(ghInfo.lastPushedAt)}</span>
-										</div>
-									{/if}
-									<div class="github-stat-row">
-										<span class="github-stat-label">STARS</span>
-										<span>{ghInfo.stars}</span>
-									</div>
-									<div class="github-stat-row">
-										<span class="github-stat-label">ISSUES</span>
-										<span>{ghInfo.openIssueCount} open</span>
-									</div>
-									{#if ghInfo.lastMergedPr}
-										<div class="github-stat-row">
-											<span class="github-stat-label">LAST PR</span>
-											<a href={ghInfo.lastMergedPr.url} target="_blank" rel="noopener noreferrer">
-												#{ghInfo.lastMergedPr.number} {ghInfo.lastMergedPr.title}
-											</a>
-										</div>
-									{/if}
-									<div class="github-stat-row">
-										<span class="github-stat-label">CACHED</span>
-										<span>{formatRelativeTime(ghInfo.fetchedAt)}</span>
-									</div>
-									<div class="github-stat-row">
-										<span class="github-stat-label">README</span>
-										<span class="github-readme-actions">
-											{#if ghInfo.readmeUpdatedAt}
-												updated {formatRelativeTime(ghInfo.readmeUpdatedAt)} ·
-											{:else if ghInfo.readmeFetchedAt}
-												synced {formatRelativeTime(ghInfo.readmeFetchedAt)} ·
-											{:else}
-												not synced yet ·
-											{/if}
-											<form method="POST" action="?/syncReadme" use:enhance style="display:inline">
-												<input type="hidden" name="projectId" value={project.id} />
-												<button type="submit">sync</button>
-											</form>
-											{#if ghInfo.readmeContent}
-												· <button type="button" onclick={() => {
-													const blob = new Blob([ghInfo!.readmeContent!], { type: 'text/markdown' });
-													const url = URL.createObjectURL(blob);
-													const a = document.createElement('a');
-													a.href = url;
-													a.download = `${project.githubRepo?.split('/')[1] ?? 'readme'}.md`;
-													a.click();
-													URL.revokeObjectURL(url);
-												}}>download</button>
-												· <button type="button" onclick={() => {
-													navigator.clipboard.writeText(ghInfo!.readmeContent!);
-												}}>copy</button>
-											{/if}
-										</span>
-									</div>
-								{/if}
-							</div>
-							<div class="github-actions">
-								<form method="POST" action="?/syncGithub" use:enhance>
-									<input type="hidden" name="projectId" value={project.id} />
-									<button type="submit">SYNC</button>
-								</form>
-								<form method="POST" action="?/unlinkGithub" use:enhance>
-									<input type="hidden" name="projectId" value={project.id} />
-									<button type="submit" class="btn-danger">UNLINK</button>
-								</form>
-							</div>
-						</div>
 					{/if}
 				</div>
 

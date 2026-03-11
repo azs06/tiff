@@ -35,6 +35,16 @@ export interface ProjectAttachment {
 	createdAt: number;
 }
 
+export interface ProjectGitHubRepo {
+	id: string;
+	projectId: string;
+	fullName: string;
+	owner: string;
+	repo: string;
+	isPrimary: boolean;
+	createdAt: number;
+}
+
 export interface Project {
 	id: string;
 	name: string;
@@ -42,9 +52,21 @@ export interface Project {
 	detail?: string;
 	resources?: Resource[];
 	attachments?: ProjectAttachment[];
-	githubRepo?: string;
+	githubRepos?: ProjectGitHubRepo[];
 	archived?: boolean;
 	archivedAt?: number;
+}
+
+export function getPrimaryProjectGitHubRepo(
+	project: Pick<Project, 'githubRepos'> | null | undefined
+): ProjectGitHubRepo | undefined {
+	const repos = project?.githubRepos;
+	if (!repos || repos.length === 0) return undefined;
+
+	return (
+		repos.find((repo) => repo.isPrimary) ??
+		[...repos].sort((a, b) => a.createdAt - b.createdAt)[0]
+	);
 }
 
 export interface GitHubRepoInfo {

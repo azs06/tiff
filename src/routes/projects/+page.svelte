@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { getPrimaryProjectGitHubRepo } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -10,6 +11,15 @@
 
 	function totalTaskCount(projectId: string): number {
 		return data.todos.filter((t) => t.projectId === projectId).length;
+	}
+
+	function primaryRepo(project: PageData['projects'][number]) {
+		return getPrimaryProjectGitHubRepo(project);
+	}
+
+	function primaryRepoInfo(project: PageData['projects'][number]) {
+		const repo = primaryRepo(project);
+		return repo ? data.githubInfo[repo.id] : undefined;
 	}
 
 	function formatRelativeTime(isoOrMs: string | number): string {
@@ -60,10 +70,9 @@
 							<span class="project-list-name">{project.name}</span>
 							<span class="project-list-meta">
 								{activeTaskCount(project.id)} active · {totalTaskCount(project.id)} total
-								{#if project.githubRepo && data.githubInfo[project.id]}
-									{@const info = data.githubInfo[project.id]}
+								{#if primaryRepo(project) && primaryRepoInfo(project)}
 									<span class="github-badge">
-										· {project.githubRepo}{#if info.lastPushedAt && !info.error} · pushed {formatRelativeTime(info.lastPushedAt)}{/if}
+										· {primaryRepo(project)?.fullName}{#if primaryRepoInfo(project)?.lastPushedAt && !primaryRepoInfo(project)?.error} · pushed {formatRelativeTime(primaryRepoInfo(project)?.lastPushedAt ?? '')}{/if}
 									</span>
 								{/if}
 							</span>

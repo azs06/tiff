@@ -13,9 +13,14 @@ import {
 	saveGitHubInfo,
 	hasAnyStorage
 } from '$lib/storage';
-import { DEFAULT_SETTINGS, type LegacyFocusState, type GitHubRepoInfo } from '$lib/types';
+import {
+	DEFAULT_SETTINGS,
+	getPrimaryProjectGitHubRepo,
+	type LegacyFocusState,
+	type GitHubRepoInfo
+} from '$lib/types';
 import { ensureOpenSession, normalizeFocusState } from '$lib/focus';
-import { parseGitHubRepo, fetchRepoInfo, isCacheFresh } from '$lib/github';
+import { fetchRepoInfo, isCacheFresh } from '$lib/github';
 
 export async function loadAppData(locals: App.Locals, platform: App.Platform | undefined) {
 	const env = platform?.env;
@@ -99,49 +104,46 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 		await saveSessions(env, email, sessions);
 	}
 
-	// Load GitHub info for linked projects
+	// Load GitHub info for linked project repos
 	const githubInfo: Record<string, GitHubRepoInfo> = {};
-	const linkedProjects = projects.filter((p) => p.githubRepo);
-	if (linkedProjects.length > 0) {
+	const linkedRepos = projects.flatMap((project) => project.githubRepos ?? []);
+	if (linkedRepos.length > 0) {
 		const results = await Promise.all(
-			linkedProjects.map(async (p) => {
-				const cached = await getGitHubInfo(env, email, p.id);
-				if (cached && isCacheFresh(cached)) return { id: p.id, info: cached };
+			linkedRepos.map(async (repoLink) => {
+				const cached = await getGitHubInfo(env, email, repoLink.id);
+				if (cached && isCacheFresh(cached)) return { id: repoLink.id, info: cached };
 
-				if (githubToken && p.githubRepo) {
-					const parsed = parseGitHubRepo(p.githubRepo);
-					if (parsed) {
-						try {
-							const fresh = await fetchRepoInfo(parsed.owner, parsed.repo, {
-								token: githubToken
-							});
-							if (cached) {
-								if (cached.readmeContent) fresh.readmeContent = cached.readmeContent;
-								if (cached.readmeFetchedAt) fresh.readmeFetchedAt = cached.readmeFetchedAt;
-								if (cached.readmeUpdatedAt) fresh.readmeUpdatedAt = cached.readmeUpdatedAt;
-							}
-							await saveGitHubInfo(env, email, p.id, fresh);
-							return { id: p.id, info: fresh };
-						} catch {
-							if (cached) return { id: p.id, info: cached };
-							const errorInfo: GitHubRepoInfo = {
-								fullName: p.githubRepo,
-								description: null,
-								defaultBranch: 'main',
-								lastPushedAt: '',
-								stars: 0,
-								openIssueCount: 0,
-								lastMergedPr: null,
-								fetchedAt: Date.now(),
-								error: 'Failed to fetch repository info'
-							};
-							await saveGitHubInfo(env, email, p.id, errorInfo);
-							return { id: p.id, info: errorInfo };
+				if (githubToken) {
+					try {
+						const fresh = await fetchRepoInfo(repoLink.owner, repoLink.repo, {
+							token: githubToken
+						});
+						if (cached) {
+							if (cached.readmeContent) fresh.readmeContent = cached.readmeContent;
+							if (cached.readmeFetchedAt) fresh.readmeFetchedAt = cached.readmeFetchedAt;
+							if (cached.readmeUpdatedAt) fresh.readmeUpdatedAt = cached.readmeUpdatedAt;
 						}
+						await saveGitHubInfo(env, email, repoLink.id, fresh);
+						return { id: repoLink.id, info: fresh };
+					} catch {
+						if (cached) return { id: repoLink.id, info: cached };
+						const errorInfo: GitHubRepoInfo = {
+							fullName: repoLink.fullName,
+							description: null,
+							defaultBranch: 'main',
+							lastPushedAt: '',
+							stars: 0,
+							openIssueCount: 0,
+							lastMergedPr: null,
+							fetchedAt: Date.now(),
+							error: 'Failed to fetch repository info'
+						};
+						await saveGitHubInfo(env, email, repoLink.id, errorInfo);
+						return { id: repoLink.id, info: errorInfo };
 					}
 				}
 
-				if (cached) return { id: p.id, info: cached };
+				if (cached) return { id: repoLink.id, info: cached };
 				return null;
 			})
 		);
@@ -155,6 +157,17 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 	const archivedTodos = allTodos.filter((t) => t.archived);
 	const activeProjects = projects.filter((p) => !p.archived);
 	const archivedProjects = projects.filter((p) => p.archived);
+
+	for (const project of [...activeProjects, ...archivedProjects]) {
+		const primaryRepo = getPrimaryProjectGitHubRepo(project);
+		if (!primaryRepo) continue;
+
+		project.githubRepos = [
+			primaryRepo,
+			...(project.githubRepos ?? []).filter((repo) => repo.id !== primaryRepo.id)
+		];
+	}
+
 	return {
 		todos,
 		archivedTodos,

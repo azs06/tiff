@@ -6,6 +6,7 @@ import type {
 	PomodoroLog,
 	Project,
 	ProjectAttachment,
+	ProjectGitHubRepo,
 	Resource,
 	TaskLog,
 	TimerState,
@@ -14,6 +15,7 @@ import type {
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import { normalizeFocusState } from './focus';
+import { parseGitHubRepo } from './github';
 
 function toBool(value: unknown): boolean {
 	if (typeof value === 'boolean') return value;
@@ -46,10 +48,37 @@ function normalizeProject(project: Project): Project {
 	if (project.detail) normalized.detail = project.detail;
 	if (project.resources && project.resources.length > 0) normalized.resources = project.resources;
 	if (project.attachments && project.attachments.length > 0) normalized.attachments = project.attachments;
-	if (project.githubRepo) normalized.githubRepo = project.githubRepo;
+	const githubRepos = normalizeProjectGitHubRepos(project);
+	if (githubRepos.length > 0) normalized.githubRepos = githubRepos;
 	if (project.archived) normalized.archived = project.archived;
 	if (project.archivedAt) normalized.archivedAt = project.archivedAt;
 	return normalized;
+}
+
+function createLegacyProjectGitHubRepo(project: Project): ProjectGitHubRepo | null {
+	const legacyRepo = (project as Project & { githubRepo?: string }).githubRepo;
+	if (!legacyRepo) return null;
+
+	const parsed = parseGitHubRepo(legacyRepo);
+	if (!parsed) return null;
+
+	return {
+		id: `legacy:${project.id}:${parsed.owner}:${parsed.repo}`,
+		projectId: project.id,
+		fullName: `${parsed.owner}/${parsed.repo}`,
+		owner: parsed.owner,
+		repo: parsed.repo,
+		isPrimary: true,
+		createdAt: project.createdAt
+	};
+}
+
+function normalizeProjectGitHubRepos(project: Project): ProjectGitHubRepo[] {
+	const repos = project.githubRepos?.map((repo) => ({ ...repo, projectId: project.id })) ?? [];
+	if (repos.length > 0) return repos;
+
+	const legacyRepo = createLegacyProjectGitHubRepo(project);
+	return legacyRepo ? [legacyRepo] : [];
 }
 
 type TodoRow = {
@@ -80,6 +109,16 @@ type ProjectRow = {
 	github_repo: string | null;
 	archived: number;
 	archived_at: number | null;
+};
+
+type ProjectGitHubRepoRow = {
+	id: string;
+	project_id: string;
+	full_name: string;
+	owner: string;
+	repo: string;
+	is_primary: number;
+	created_at: number;
 };
 
 type ResourceRow = {
@@ -444,6 +483,15 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 		)
 		.bind(email)
 		.all<AttachmentRow>();
+	const githubRepoRows = await db
+		.prepare(
+			`SELECT id, project_id, full_name, owner, repo, is_primary, created_at
+			 FROM project_github_repos
+			 WHERE user_email = ?
+			 ORDER BY created_at ASC`
+		)
+		.bind(email)
+		.all<ProjectGitHubRepoRow>();
 
 	const resourcesByProject = new Map<string, Resource[]>();
 	for (const row of resourceRows.results) {
@@ -474,6 +522,22 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 		attachmentsByProject.set(row.project_id, arr);
 	}
 
+	const githubReposByProject = new Map<string, ProjectGitHubRepo[]>();
+	for (const row of githubRepoRows.results) {
+		const repo: ProjectGitHubRepo = {
+			id: row.id,
+			projectId: row.project_id,
+			fullName: row.full_name,
+			owner: row.owner,
+			repo: row.repo,
+			isPrimary: toBool(row.is_primary),
+			createdAt: row.created_at
+		};
+		const arr = githubReposByProject.get(row.project_id) ?? [];
+		arr.push(repo);
+		githubReposByProject.set(row.project_id, arr);
+	}
+
 	return projectRows.results.map((row) => {
 		const project: Project = {
 			id: row.id,
@@ -481,7 +545,18 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 			createdAt: row.created_at
 		};
 		if (row.detail) project.detail = row.detail;
-		if (row.github_repo) project.githubRepo = row.github_repo;
+		const githubRepos = githubReposByProject.get(row.id);
+		if (githubRepos && githubRepos.length > 0) project.githubRepos = githubRepos;
+		else if (row.github_repo) {
+			const legacyRepo = createLegacyProjectGitHubRepo({
+				id: row.id,
+				name: row.name,
+				createdAt: row.created_at,
+				detail: row.detail ?? undefined,
+				githubRepo: row.github_repo
+			} as Project & { githubRepo?: string });
+			if (legacyRepo) project.githubRepos = [legacyRepo];
+		}
 		if (toBool(row.archived)) project.archived = true;
 		if (row.archived_at) project.archivedAt = row.archived_at;
 		const resources = resourcesByProject.get(row.id);
@@ -494,6 +569,7 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 
 export async function saveProjects(db: D1Database, email: string, projects: Project[]): Promise<void> {
 	const statements: D1PreparedStatement[] = [
+		db.prepare('DELETE FROM project_github_repos WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM project_resources WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM project_attachments WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM projects WHERE user_email = ?').bind(email)
@@ -512,11 +588,32 @@ export async function saveProjects(db: D1Database, email: string, projects: Proj
 					project.name,
 					project.createdAt,
 					project.detail ?? null,
-					project.githubRepo ?? null,
+					null,
 					project.archived ? 1 : 0,
 					project.archivedAt ?? null
 				)
 		);
+
+		for (const repo of project.githubRepos ?? []) {
+			statements.push(
+				db
+					.prepare(
+						`INSERT INTO project_github_repos (
+						 user_email, id, project_id, full_name, owner, repo, is_primary, created_at
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+					)
+					.bind(
+						email,
+						repo.id,
+						project.id,
+						repo.fullName,
+						repo.owner,
+						repo.repo,
+						repo.isPrimary ? 1 : 0,
+						repo.createdAt
+					)
+			);
+		}
 
 		for (const resource of project.resources ?? []) {
 			statements.push(
@@ -901,7 +998,7 @@ export async function startSession(db: D1Database, email: string, taskId: string
 export async function getGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string
+	_repoLinkId: string
 ): Promise<GitHubRepoInfo | null> {
 	return null;
 }
@@ -909,7 +1006,7 @@ export async function getGitHubInfo(
 export async function saveGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string,
+	_repoLinkId: string,
 	_info: GitHubRepoInfo
 ): Promise<void> {
 	// GitHub cache remains in KV.
@@ -918,7 +1015,7 @@ export async function saveGitHubInfo(
 export async function deleteGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string
+	_repoLinkId: string
 ): Promise<void> {
 	// GitHub cache remains in KV.
 }
@@ -1077,6 +1174,7 @@ export async function deleteProjectCascadeTx(
 	await db.batch([
 		db.prepare('DELETE FROM project_resources WHERE user_email = ? AND project_id = ?').bind(email, projectId),
 		db.prepare('DELETE FROM project_attachments WHERE user_email = ? AND project_id = ?').bind(email, projectId),
+		db.prepare('DELETE FROM project_github_repos WHERE user_email = ? AND project_id = ?').bind(email, projectId),
 		db.prepare('DELETE FROM projects WHERE user_email = ? AND id = ?').bind(email, projectId),
 		db.prepare('UPDATE todos SET project_id = NULL WHERE user_email = ? AND project_id = ?').bind(email, projectId)
 	]);

@@ -2009,6 +2009,47 @@ body::after {
 	align-items: baseline;
 }
 
+.github-repo-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+	margin: 0.85rem 0;
+}
+
+.github-repo-card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	padding: 0.7rem 0.8rem;
+	border: 1px solid var(--border-color);
+	background: var(--bg-surface);
+}
+
+.github-repo-card-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.github-repo-card-head a {
+	color: var(--accent);
+	text-decoration: none;
+	font-size: 0.72rem;
+}
+
+.github-repo-card-head a:hover {
+	text-decoration: underline;
+}
+
+.github-repo-card-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 0.8rem;
+	font-size: 0.64rem;
+	color: var(--text-muted);
+}
+
 .github-readme-actions form {
 	display: inline;
 }
