@@ -24,13 +24,12 @@ No test framework is configured.
 
 **Auth:** Cloudflare Access JWT parsed in `src/hooks.server.ts`. In dev mode, hardcodes `dev@localhost`. Email is set on `event.locals.userEmail` for per-user data isolation.
 
-**Data layer (`src/lib/storage.ts`):** Persistence routes through a hybrid storage layer:
+**Data layer (`src/lib/storage.ts`):** Persistence routes through D1-first storage helpers:
 - Primary relational storage in D1 (`TIFF_DB`)
-- Dual-write/canary controls via `STORAGE_READ_SOURCE`, `STORAGE_DUAL_WRITE`, `D1_CANARY_EMAILS`
-- KV (`TIFF_KV`) retained for GitHub cache and migration compatibility
+- KV (`TIFF_KV`) retained for GitHub cache and legacy timer compatibility
 - R2 (`TIFF_ATTACHMENTS`) for binary attachments
 
-Legacy KV key schema (used for migration/cache):
+Legacy KV key schema (still relevant for cache/legacy compatibility):
 - `todos:{email}` — todo list (includes archived todos, task logs, resources, projectId, totalFocusMs inline)
 - `pomodoros:{email}` — completed pomodoro session logs
 - `focus:{email}` — active focus state (which task is focused + optional pomodoro sub-state)
@@ -44,9 +43,9 @@ Legacy KV key schema (used for migration/cache):
 
 **Server actions (`src/routes/+page.server.ts`):** 20 form actions — `create`, `toggle`, `delete`, `update`, `logPomodoro`, `syncFocus`, `focusTask`, `unfocus`, `archive`, `unarchive`, `saveSettings`, `saveTheme`, `addLog`, `deleteLog`, `addResource`, `deleteResource`, `createProject`, `deleteProject`, `setTaskProject` — all using SvelteKit's `use:enhance` for progressive enhancement.
 
-**Focus (`src/routes/+page.svelte`):** Focus state and optional Pomodoro timer logic is client-side using Svelte 5 runes. Focus state hydrates from server KV on load, then syncs back via hidden forms. Session tracking (start/end) happens server-side via `focusTask`/`unfocus` actions.
+**Focus (`src/routes/+page.svelte`):** Focus state and optional Pomodoro timer logic is client-side using Svelte 5 runes. Focus state hydrates from server storage on load, then syncs back via hidden forms. Session tracking (start/end) happens server-side via `focusTask`/`unfocus` actions.
 
-**Types (`src/lib/types.ts`):** Shared interfaces — `Todo`, `FocusState`, `FocusSession`, `Project`, `PomodoroLog`, `UserSettings`, `Theme`, `TaskLog`, `Resource`, `TimerState` (legacy, kept for migration). Also exports `DEFAULT_SETTINGS` and `THEMES`.
+**Types (`src/lib/types.ts`):** Shared interfaces — `Todo`, `FocusState`, `FocusSession`, `Project`, `PomodoroLog`, `UserSettings`, `Theme`, `TaskLog`, `Resource`, `TimerState` (legacy compatibility only). Also exports `DEFAULT_SETTINGS` and `THEMES`.
 
 **Pomodoro config (`src/lib/pomodoro.ts`):** `nextInterval()` logic (break type based on completed count). Default durations come from `DEFAULT_SETTINGS` in types.
 
@@ -57,7 +56,7 @@ Legacy KV key schema (used for migration/cache):
 ## Style Conventions
 
 - Svelte 5 runes API (`$state()`, `$derived`, `$effect`, `$props()`) — not legacy reactive syntax
-- Three themes (`signal`, `paper`, `nothing`) controlled by `data-theme` attribute on `<html>`, persisted to KV
+- Three themes (`signal`, `paper`, `nothing`) controlled by `data-theme` attribute on `<html>`, persisted through the primary storage layer
 - All CSS in `src/app.css` using custom properties (`--bg-deep`, `--bg-panel`, `--bg-surface`, `--bg-elevated`, `--text-primary`, `--text-muted`, `--text-dim`, `--accent`, `--accent-dark`, `--danger`, `--border-color`, `--font`, `--font-display`, `--hero-bg`, `--hero-text`)
 - Theme overrides use `[data-theme="paper"]` and `[data-theme="nothing"]` selectors with per-theme clean minimal styling (nothing) and texture/typography effects (paper)
 - Hero section uses `.hero-focus` class with compact pomodoro pill (`.pomo-pill`), session elapsed counter, and quick log form

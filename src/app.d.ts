@@ -12,10 +12,6 @@ declare global {
 				GITHUB_TOKEN?: string;
 				CF_ACCESS_AUD?: string;
 				CF_ACCESS_TEAM_DOMAIN?: string;
-				STORAGE_READ_SOURCE?: 'kv' | 'd1';
-				STORAGE_DUAL_WRITE?: 'true' | 'false';
-				D1_CANARY_EMAILS?: string;
-				MIGRATION_ADMIN_TOKEN?: string;
 			};
 		}
 	}
