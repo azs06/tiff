@@ -394,65 +394,6 @@ export const sharedActions: Actions = {
 		if (!name) return fail(400);
 
 		const detail = data.get('detail')?.toString().trim() || undefined;
-		const repoRaw = data.get('repo')?.toString().trim();
-		let githubRepoLink: ProjectGitHubRepo | undefined;
-
-		if (repoRaw) {
-			const parsed = parseGitHubRepo(repoRaw);
-			if (!parsed) return fail(400, { error: 'Invalid GitHub repo format' });
-			const projectId = crypto.randomUUID();
-			githubRepoLink = {
-				id: crypto.randomUUID(),
-				projectId,
-				fullName: `${parsed.owner}/${parsed.repo}`,
-				owner: parsed.owner,
-				repo: parsed.repo,
-				isPrimary: true,
-				createdAt: Date.now()
-			};
-
-			const project: Project = {
-				id: projectId,
-				name,
-				createdAt: githubRepoLink.createdAt
-			};
-
-			let readmeDetail: string | undefined;
-			if (platform?.env.GITHUB_TOKEN) {
-				try {
-					const [info, readmeResult] = await Promise.all([
-						fetchRepoInfo(parsed.owner, parsed.repo, {
-							token: platform.env.GITHUB_TOKEN
-						}),
-						fetchReadme(parsed.owner, parsed.repo, {
-							token: platform.env.GITHUB_TOKEN
-						})
-					]);
-					githubRepoLink = {
-						...githubRepoLink,
-						fullName: info.fullName
-					};
-					if (readmeResult) {
-						info.readmeContent = readmeResult.content;
-						info.readmeFetchedAt = Date.now();
-						if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
-						if (!detail) readmeDetail = readmeResult.content;
-					}
-					await saveGitHubInfo(env, locals.userEmail, githubRepoLink.id, info);
-				} catch {
-					// Non-fatal: cache will be populated on next page load
-				}
-			}
-
-			project.githubRepos = [githubRepoLink];
-			if (detail || readmeDetail) project.detail = detail ?? readmeDetail;
-
-			const projects = await getProjects(env, locals.userEmail);
-			projects.push(project);
-			await saveProjects(env, locals.userEmail, projects);
-			return;
-		}
-
 		const projects = await getProjects(env, locals.userEmail);
 		projects.push({
 			id: crypto.randomUUID(),

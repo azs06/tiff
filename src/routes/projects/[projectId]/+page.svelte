@@ -229,7 +229,9 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="settings-hint">No GitHub repos linked yet.</div>
+						<div class="settings-hint">
+							No GitHub repos linked yet. Add one below to connect this project to one or more repositories.
+						</div>
 					{/if}
 
 					{#if project.githubRepos && project.githubRepos.length > 0}

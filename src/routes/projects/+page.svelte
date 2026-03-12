@@ -52,9 +52,6 @@
 			}}
 		>
 			<input type="text" name="name" placeholder="Project name" required autocomplete="off" />
-			{#if data.hasGithubToken}
-				<input type="text" name="repo" placeholder="GitHub repo (optional)" autocomplete="off" />
-			{/if}
 			<button type="submit">ADD</button>
 		</form>
 	</section>
