@@ -7,11 +7,14 @@ import type {
 	Resource,
 	Project,
 	ProjectAttachment,
+	ProjectGitHubRepo,
 	FocusState,
 	FocusSession,
 	GitHubRepoInfo
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
+import { normalizeFocusState } from './focus';
+import { parseGitHubRepo } from './github';
 
 export async function getTodos(kv: KVNamespace, email: string): Promise<Todo[]> {
 	const data = await kv.get(`todos:${email}`, 'json');
@@ -174,10 +177,37 @@ function normalizeProject(project: Project): Project {
 	if (project.detail) normalized.detail = project.detail;
 	if (project.resources && project.resources.length > 0) normalized.resources = project.resources;
 	if (project.attachments && project.attachments.length > 0) normalized.attachments = project.attachments;
-	if (project.githubRepo) normalized.githubRepo = project.githubRepo;
+	const githubRepos = normalizeProjectGitHubRepos(project);
+	if (githubRepos.length > 0) normalized.githubRepos = githubRepos;
 	if (project.archived) normalized.archived = project.archived;
 	if (project.archivedAt) normalized.archivedAt = project.archivedAt;
 	return normalized;
+}
+
+function createLegacyProjectGitHubRepo(project: Project): ProjectGitHubRepo | null {
+	const legacyRepo = (project as Project & { githubRepo?: string }).githubRepo;
+	if (!legacyRepo) return null;
+
+	const parsed = parseGitHubRepo(legacyRepo);
+	if (!parsed) return null;
+
+	return {
+		id: `legacy:${project.id}:${parsed.owner}:${parsed.repo}`,
+		projectId: project.id,
+		fullName: `${parsed.owner}/${parsed.repo}`,
+		owner: parsed.owner,
+		repo: parsed.repo,
+		isPrimary: true,
+		createdAt: project.createdAt
+	};
+}
+
+function normalizeProjectGitHubRepos(project: Project): ProjectGitHubRepo[] {
+	const repos = project.githubRepos?.map((repo) => ({ ...repo, projectId: project.id })) ?? [];
+	if (repos.length > 0) return repos;
+
+	const legacyRepo = createLegacyProjectGitHubRepo(project);
+	return legacyRepo ? [legacyRepo] : [];
 }
 
 export async function getProjects(kv: KVNamespace, email: string): Promise<Project[]> {
@@ -304,14 +334,15 @@ export async function unarchiveProject(kv: KVNamespace, email: string, id: strin
 
 export async function getFocus(kv: KVNamespace, email: string): Promise<FocusState | null> {
 	const data = await kv.get(`focus:${email}`, 'json');
-	return (data as FocusState) ?? null;
+	return normalizeFocusState((data as FocusState) ?? null);
 }
 
 export async function saveFocus(kv: KVNamespace, email: string, focus: FocusState | null): Promise<void> {
-	if (focus === null) {
+	const normalized = normalizeFocusState(focus);
+	if (normalized === null) {
 		await kv.delete(`focus:${email}`);
 	} else {
-		await kv.put(`focus:${email}`, JSON.stringify(focus));
+		await kv.put(`focus:${email}`, JSON.stringify(normalized));
 	}
 }
 
@@ -364,25 +395,25 @@ export async function startSession(kv: KVNamespace, email: string, taskId: strin
 export async function getGitHubInfo(
 	kv: KVNamespace,
 	email: string,
-	projectId: string
+	repoLinkId: string
 ): Promise<GitHubRepoInfo | null> {
-	const data = await kv.get(`github:${email}:${projectId}`, 'json');
+	const data = await kv.get(`github:${email}:${repoLinkId}`, 'json');
 	return (data as GitHubRepoInfo) ?? null;
 }
 
 export async function saveGitHubInfo(
 	kv: KVNamespace,
 	email: string,
-	projectId: string,
+	repoLinkId: string,
 	info: GitHubRepoInfo
 ): Promise<void> {
-	await kv.put(`github:${email}:${projectId}`, JSON.stringify(info), { expirationTtl: 900 });
+	await kv.put(`github:${email}:${repoLinkId}`, JSON.stringify(info), { expirationTtl: 900 });
 }
 
 export async function deleteGitHubInfo(
 	kv: KVNamespace,
 	email: string,
-	projectId: string
+	repoLinkId: string
 ): Promise<void> {
-	await kv.delete(`github:${email}:${projectId}`);
+	await kv.delete(`github:${email}:${repoLinkId}`);
 }

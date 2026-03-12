@@ -14,9 +14,6 @@ import {
 	deleteTaskLog,
 	getProjects,
 	saveProjects,
-	getFocus,
-	saveFocus,
-	endActiveSession,
 	saveTodos,
 	updateProject,
 	addProjectResource,
@@ -28,13 +25,29 @@ import {
 	deleteGitHubInfo,
 	archiveProject,
 	unarchiveProject,
+	expandFocusTaskTx,
 	focusTaskTx,
-	unfocusTx,
+	pauseFocusTaskTx,
+	resumeFocusTaskTx,
+	stopFocusTaskTx,
+	startTaskPomodoroTx,
+	pauseTaskPomodoroTx,
+	resumeTaskPomodoroTx,
+	resetTaskPomodoroTx,
+	advanceTaskPomodoroTx,
+	stopTaskPomodoroTx,
+	dismissTaskPomodoroTx,
 	toggleTodoAndHandleFocusTx,
 	deleteProjectCascadeTx
 } from '$lib/storage';
-import type { FocusState, UserSettings, Theme } from '$lib/types';
-import { THEMES } from '$lib/types';
+import {
+	THEMES,
+	getPrimaryProjectGitHubRepo,
+	type Project,
+	type ProjectGitHubRepo,
+	type UserSettings,
+	type Theme
+} from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
 
 function resolveDeadline(value: string | undefined, timezoneOffset: number): number | undefined {
@@ -68,6 +81,58 @@ function sanitizeFilename(filename: string): string {
 
 function buildAttachmentUrl(projectId: string, attachmentId: string): string {
 	return `/attachments/${projectId}/${attachmentId}`;
+}
+
+function normalizeRepoKey(fullName: string): string {
+	return fullName.trim().toLowerCase();
+}
+
+function getProjectRepos(project: Project): ProjectGitHubRepo[] {
+	return project.githubRepos ?? [];
+}
+
+function sortProjectRepos(repos: ProjectGitHubRepo[]): ProjectGitHubRepo[] {
+	return [...repos].sort((a, b) => {
+		if (a.isPrimary !== b.isPrimary) return Number(b.isPrimary) - Number(a.isPrimary);
+		return a.createdAt - b.createdAt;
+	});
+}
+
+function setPrimaryRepo(project: Project, repoLinkId: string): boolean {
+	const repos = getProjectRepos(project);
+	if (repos.length === 0) return false;
+
+	if (!repos.some((repo) => repo.id === repoLinkId)) return false;
+
+	project.githubRepos = repos.map((repo) => ({
+		...repo,
+		isPrimary: repo.id === repoLinkId
+	}));
+	return true;
+}
+
+function removeProjectRepo(project: Project, repoLinkId: string): ProjectGitHubRepo | null {
+	const repos = getProjectRepos(project);
+	const removed = repos.find((repo) => repo.id === repoLinkId) ?? null;
+	if (!removed) return null;
+
+	const remaining = repos.filter((repo) => repo.id !== repoLinkId);
+	if (remaining.length === 0) {
+		delete project.githubRepos;
+		return removed;
+	}
+
+	const nextPrimaryId =
+		remaining.find((repo) => repo.isPrimary)?.id ??
+		[...remaining].sort((a, b) => a.createdAt - b.createdAt)[0]?.id;
+
+	project.githubRepos = sortProjectRepos(
+		remaining.map((repo) => ({
+			...repo,
+			isPrimary: repo.id === nextPrimaryId
+		}))
+	);
+	return removed;
 }
 
 export const sharedActions: Actions = {
@@ -107,13 +172,7 @@ export const sharedActions: Actions = {
 		const data = await request.formData();
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
-
-		const focus = await getFocus(env, locals.userEmail);
-		if (focus?.activeTaskId === id) {
-			await endActiveSession(env, locals.userEmail, 'manual');
-			await saveFocus(env, locals.userEmail, null);
-		}
-
+		await stopFocusTaskTx(env, locals.userEmail, id, 'manual');
 		await deleteTodo(env, locals.userEmail, id);
 	},
 
@@ -150,18 +209,6 @@ export const sharedActions: Actions = {
 		await logPomodoro(env, locals.userEmail, { taskId, type, duration });
 	},
 
-	syncFocus: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const raw = data.get('focus')?.toString();
-		if (!raw || raw === 'null') {
-			await saveFocus(env, locals.userEmail, null);
-		} else {
-			const parsed = JSON.parse(raw) as FocusState;
-			await saveFocus(env, locals.userEmail, parsed);
-		}
-	},
-
 	focusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
@@ -170,9 +217,98 @@ export const sharedActions: Actions = {
 		await focusTaskTx(env, locals.userEmail, taskId);
 	},
 
-	unfocus: async ({ locals, platform }) => {
+	expandFocusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
-		await unfocusTx(env, locals.userEmail, 'manual');
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await expandFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	pauseFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await pauseFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	resumeFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resumeFocusTaskTx(env, locals.userEmail, taskId);
+	},
+
+	stopFocusTask: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await stopFocusTaskTx(env, locals.userEmail, taskId, 'manual');
+	},
+
+	unfocus: async ({ locals, platform }) => {
+		void locals;
+		void platform;
+		return fail(400, { error: 'Unfocus all is no longer supported from the UI' });
+	},
+
+	startTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await startTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	pauseTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await pauseTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	resumeTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resumeTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	resetTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await resetTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	advanceTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await advanceTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	stopTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await stopTaskPomodoroTx(env, locals.userEmail, taskId);
+	},
+
+	dismissTaskPomodoro: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const taskId = data.get('taskId')?.toString();
+		if (!taskId) return fail(400);
+		await dismissTaskPomodoroTx(env, locals.userEmail, taskId);
 	},
 
 	archive: async ({ request, locals, platform }) => {
@@ -258,48 +394,12 @@ export const sharedActions: Actions = {
 		if (!name) return fail(400);
 
 		const detail = data.get('detail')?.toString().trim() || undefined;
-		const repoRaw = data.get('repo')?.toString().trim();
-		let githubRepo: string | undefined;
-
-		if (repoRaw) {
-			const parsed = parseGitHubRepo(repoRaw);
-			if (!parsed) return fail(400, { error: 'Invalid GitHub repo format' });
-			githubRepo = `${parsed.owner}/${parsed.repo}`;
-		}
-
-		const projectId = crypto.randomUUID();
-		let readmeDetail: string | undefined;
-
-		if (githubRepo && platform?.env.GITHUB_TOKEN) {
-			const parsed = parseGitHubRepo(githubRepo)!;
-			try {
-				const [info, readmeResult] = await Promise.all([
-					fetchRepoInfo(parsed.owner, parsed.repo, {
-						token: platform.env.GITHUB_TOKEN
-					}),
-					fetchReadme(parsed.owner, parsed.repo, {
-						token: platform.env.GITHUB_TOKEN
-					})
-				]);
-				if (readmeResult) {
-					info.readmeContent = readmeResult.content;
-					info.readmeFetchedAt = Date.now();
-					if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
-					if (!detail) readmeDetail = readmeResult.content;
-				}
-				await saveGitHubInfo(env, locals.userEmail, projectId, info);
-			} catch {
-				// Non-fatal: cache will be populated on next page load
-			}
-		}
-
 		const projects = await getProjects(env, locals.userEmail);
 		projects.push({
-			id: projectId,
+			id: crypto.randomUUID(),
 			name,
 			createdAt: Date.now(),
-			...(detail || readmeDetail ? { detail: detail ?? readmeDetail } : {}),
-			...(githubRepo ? { githubRepo } : {})
+			...(detail ? { detail } : {})
 		});
 		await saveProjects(env, locals.userEmail, projects);
 	},
@@ -330,9 +430,13 @@ export const sharedActions: Actions = {
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
 
+		const projects = await getProjects(env, locals.userEmail);
+		const project = projects.find((entry) => entry.id === id);
 		const { attachmentKeys: keys } = await deleteProjectCascadeTx(env, locals.userEmail, id);
 		if (keys.length > 0) await r2.delete(keys);
-		await deleteGitHubInfo(env, locals.userEmail, id);
+		for (const repo of project?.githubRepos ?? []) {
+			await deleteGitHubInfo(env, locals.userEmail, repo.id);
+		}
 	},
 
 	setTaskProject: async ({ request, locals, platform }) => {
@@ -361,7 +465,7 @@ export const sharedActions: Actions = {
 		await saveTodos(env, locals.userEmail, todos);
 	},
 
-	linkGithub: async ({ request, locals, platform }) => {
+	addProjectGithubRepo: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
@@ -377,23 +481,40 @@ export const sharedActions: Actions = {
 		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
 		if (!project) return fail(400, { error: 'Project not found' });
+		if (
+			getProjectRepos(project).some(
+				(entry) =>
+					normalizeRepoKey(entry.fullName) === normalizeRepoKey(`${parsed.owner}/${parsed.repo}`)
+			)
+		) {
+			return fail(400, { error: 'Repository already linked to this project' });
+		}
 
 		try {
 			const [info, readmeResult] = await Promise.all([
 				fetchRepoInfo(parsed.owner, parsed.repo, { token }),
 				fetchReadme(parsed.owner, parsed.repo, { token })
 			]);
-			project.githubRepo = `${parsed.owner}/${parsed.repo}`;
+			const repoLink: ProjectGitHubRepo = {
+				id: crypto.randomUUID(),
+				projectId: project.id,
+				fullName: info.fullName,
+				owner: parsed.owner,
+				repo: parsed.repo,
+				isPrimary: getProjectRepos(project).length === 0,
+				createdAt: Date.now()
+			};
+			project.githubRepos = sortProjectRepos([...(project.githubRepos ?? []), repoLink]);
 
 			if (readmeResult) {
 				info.readmeContent = readmeResult.content;
 				info.readmeFetchedAt = Date.now();
 				if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
-				if (!project.detail) project.detail = readmeResult.content;
+				if (repoLink.isPrimary && !project.detail) project.detail = readmeResult.content;
 			}
 
 			await saveProjects(env, locals.userEmail, projects);
-			await saveGitHubInfo(env, locals.userEmail, projectId, info);
+			await saveGitHubInfo(env, locals.userEmail, repoLink.id, info);
 		} catch (e) {
 			if (e instanceof GitHubError) {
 				if (e.code === 'not_found') return fail(400, { error: 'Repository not found' });
@@ -403,7 +524,25 @@ export const sharedActions: Actions = {
 		}
 	},
 
-	syncReadme: async ({ request, locals, platform }) => {
+	setPrimaryProjectGithubRepo: async ({ request, locals, platform }) => {
+		const env = platform?.env;
+		const data = await request.formData();
+		const projectId = data.get('projectId')?.toString();
+		const repoLinkId = data.get('repoLinkId')?.toString();
+		if (!projectId || !repoLinkId) return fail(400);
+
+		const projects = await getProjects(env, locals.userEmail);
+		const project = projects.find((p) => p.id === projectId);
+		if (!project) return fail(400, { error: 'Project not found' });
+		if (!setPrimaryRepo(project, repoLinkId)) {
+			return fail(400, { error: 'Repository not found' });
+		}
+
+		project.githubRepos = sortProjectRepos(project.githubRepos ?? []);
+		await saveProjects(env, locals.userEmail, projects);
+	},
+
+	syncProjectReadmeFromPrimary: async ({ request, locals, platform }) => {
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
 
@@ -414,73 +553,75 @@ export const sharedActions: Actions = {
 
 		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
-		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
+		const primaryRepo = getPrimaryProjectGitHubRepo(project);
+		if (!project || !primaryRepo) return fail(400, { error: 'No GitHub repo linked' });
 
-		const parsed = parseGitHubRepo(project.githubRepo);
-		if (!parsed) return fail(400, { error: 'Invalid repo format' });
-
-		const readmeResult = await fetchReadme(parsed.owner, parsed.repo, { token });
+		const readmeResult = await fetchReadme(primaryRepo.owner, primaryRepo.repo, { token });
 		if (!readmeResult) return fail(404, { error: 'README not found in repository' });
 
-		// Write README to project detail
 		project.detail = readmeResult.content;
 		await saveProjects(env, locals.userEmail, projects);
 
-		// Update cached GitHub info with README content
-		const existing = await getGitHubInfo(env, locals.userEmail, projectId);
-		if (existing) {
-			existing.readmeContent = readmeResult.content;
-			existing.readmeFetchedAt = Date.now();
-			if (readmeResult.updatedAt) existing.readmeUpdatedAt = readmeResult.updatedAt;
-			await saveGitHubInfo(env, locals.userEmail, projectId, existing);
-		}
+		const existing = await getGitHubInfo(env, locals.userEmail, primaryRepo.id);
+		const info =
+			existing ??
+			(await fetchRepoInfo(primaryRepo.owner, primaryRepo.repo, {
+				token
+			}));
+		info.readmeContent = readmeResult.content;
+		info.readmeFetchedAt = Date.now();
+		if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
+		await saveGitHubInfo(env, locals.userEmail, primaryRepo.id, info);
 	},
 
-	unlinkGithub: async ({ request, locals, platform }) => {
+	removeProjectGithubRepo: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
-		if (!projectId) return fail(400);
+		const repoLinkId = data.get('repoLinkId')?.toString();
+		if (!projectId || !repoLinkId) return fail(400);
 
 		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
-		if (!project) return fail(400);
+		if (!project) return fail(400, { error: 'Project not found' });
 
-		delete project.githubRepo;
+		const removed = removeProjectRepo(project, repoLinkId);
+		if (!removed) return fail(400, { error: 'Repository not found' });
 		await saveProjects(env, locals.userEmail, projects);
-		await deleteGitHubInfo(env, locals.userEmail, projectId);
+		await deleteGitHubInfo(env, locals.userEmail, removed.id);
 	},
 
-	syncGithub: async ({ request, locals, platform }) => {
+	syncProjectGithubRepo: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const token = platform?.env.GITHUB_TOKEN;
 		if (!token) return fail(400, { error: 'GitHub integration not configured' });
 
 		const data = await request.formData();
 		const projectId = data.get('projectId')?.toString();
-		if (!projectId) return fail(400);
+		const repoLinkId = data.get('repoLinkId')?.toString();
+		if (!projectId || !repoLinkId) return fail(400);
 
 		const projects = await getProjects(env, locals.userEmail);
 		const project = projects.find((p) => p.id === projectId);
-		if (!project?.githubRepo) return fail(400, { error: 'No GitHub repo linked' });
-
-		const parsed = parseGitHubRepo(project.githubRepo);
-		if (!parsed) return fail(400, { error: 'Invalid repo format' });
+		if (!project) return fail(400, { error: 'Project not found' });
+		const repoLink = getProjectRepos(project).find((repo) => repo.id === repoLinkId);
+		if (!repoLink) return fail(400, { error: 'Repository not found' });
 
 		try {
 			const [info, readmeResult] = await Promise.all([
-				fetchRepoInfo(parsed.owner, parsed.repo, { token }),
-				fetchReadme(parsed.owner, parsed.repo, { token })
+				fetchRepoInfo(repoLink.owner, repoLink.repo, { token }),
+				fetchReadme(repoLink.owner, repoLink.repo, { token })
 			]);
 			if (readmeResult) {
 				info.readmeContent = readmeResult.content;
 				info.readmeFetchedAt = Date.now();
 				if (readmeResult.updatedAt) info.readmeUpdatedAt = readmeResult.updatedAt;
 			}
-			await saveGitHubInfo(env, locals.userEmail, projectId, info);
+			await saveGitHubInfo(env, locals.userEmail, repoLink.id, info);
 		} catch (e) {
 			if (e instanceof GitHubError) {
 				if (e.code === 'rate_limited') return fail(429, { error: 'GitHub rate limit exceeded' });
+				if (e.code === 'not_found') return fail(400, { error: 'Repository not found' });
 			}
 			return fail(500, { error: 'Failed to sync repository info' });
 		}

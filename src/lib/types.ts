@@ -35,6 +35,16 @@ export interface ProjectAttachment {
 	createdAt: number;
 }
 
+export interface ProjectGitHubRepo {
+	id: string;
+	projectId: string;
+	fullName: string;
+	owner: string;
+	repo: string;
+	isPrimary: boolean;
+	createdAt: number;
+}
+
 export interface Project {
 	id: string;
 	name: string;
@@ -42,9 +52,21 @@ export interface Project {
 	detail?: string;
 	resources?: Resource[];
 	attachments?: ProjectAttachment[];
-	githubRepo?: string;
+	githubRepos?: ProjectGitHubRepo[];
 	archived?: boolean;
 	archivedAt?: number;
+}
+
+export function getPrimaryProjectGitHubRepo(
+	project: Pick<Project, 'githubRepos'> | null | undefined
+): ProjectGitHubRepo | undefined {
+	const repos = project?.githubRepos;
+	if (!repos || repos.length === 0) return undefined;
+
+	return (
+		repos.find((repo) => repo.isPrimary) ??
+		[...repos].sort((a, b) => a.createdAt - b.createdAt)[0]
+	);
 }
 
 export interface GitHubRepoInfo {
@@ -67,23 +89,40 @@ export interface FocusSession {
 	taskId: string;
 	startedAt: number;
 	endedAt?: number;
-	endReason?: 'switch' | 'done' | 'manual';
+	endReason?: 'switch' | 'done' | 'manual' | 'pause';
+}
+
+export interface FocusPomodoroState {
+	startedAt: number;
+	duration: number;
+	type: 'work' | 'short-break' | 'long-break';
+	completedPomodoros: number;
+	paused: boolean;
+	pausedRemaining?: number;
+}
+
+export interface FocusedTaskState {
+	taskId: string;
+	addedAt: number;
+	lastInteractedAt: number;
+	sessionStatus: 'running' | 'paused';
+	sessionElapsedMs: number;
+	sessionStartedAt?: number;
+	pomodoro?: FocusPomodoroState;
 }
 
 export interface FocusState {
+	expandedTaskId: string | null;
+	tasks: FocusedTaskState[];
+}
+
+export interface LegacyFocusState {
 	activeTaskId: string;
 	focusedAt: number;
 	sessionPaused?: boolean;
 	pausedAt?: number;
 	accumulatedPauseMs?: number;
-	pomodoro?: {
-		startedAt: number;
-		duration: number;
-		type: 'work' | 'short-break' | 'long-break';
-		completedPomodoros: number;
-		paused: boolean;
-		pausedRemaining?: number;
-	};
+	pomodoro?: FocusPomodoroState;
 }
 
 export type Theme = 'signal' | 'paper' | 'nothing';

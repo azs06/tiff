@@ -2,9 +2,11 @@ import type {
 	FocusSession,
 	FocusState,
 	GitHubRepoInfo,
+	LegacyFocusState,
 	PomodoroLog,
 	Project,
 	ProjectAttachment,
+	ProjectGitHubRepo,
 	Resource,
 	TaskLog,
 	TimerState,
@@ -12,6 +14,8 @@ import type {
 	UserSettings
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
+import { normalizeFocusState } from './focus';
+import { parseGitHubRepo } from './github';
 
 function toBool(value: unknown): boolean {
 	if (typeof value === 'boolean') return value;
@@ -44,10 +48,37 @@ function normalizeProject(project: Project): Project {
 	if (project.detail) normalized.detail = project.detail;
 	if (project.resources && project.resources.length > 0) normalized.resources = project.resources;
 	if (project.attachments && project.attachments.length > 0) normalized.attachments = project.attachments;
-	if (project.githubRepo) normalized.githubRepo = project.githubRepo;
+	const githubRepos = normalizeProjectGitHubRepos(project);
+	if (githubRepos.length > 0) normalized.githubRepos = githubRepos;
 	if (project.archived) normalized.archived = project.archived;
 	if (project.archivedAt) normalized.archivedAt = project.archivedAt;
 	return normalized;
+}
+
+function createLegacyProjectGitHubRepo(project: Project): ProjectGitHubRepo | null {
+	const legacyRepo = (project as Project & { githubRepo?: string }).githubRepo;
+	if (!legacyRepo) return null;
+
+	const parsed = parseGitHubRepo(legacyRepo);
+	if (!parsed) return null;
+
+	return {
+		id: `legacy:${project.id}:${parsed.owner}:${parsed.repo}`,
+		projectId: project.id,
+		fullName: `${parsed.owner}/${parsed.repo}`,
+		owner: parsed.owner,
+		repo: parsed.repo,
+		isPrimary: true,
+		createdAt: project.createdAt
+	};
+}
+
+function normalizeProjectGitHubRepos(project: Project): ProjectGitHubRepo[] {
+	const repos = project.githubRepos?.map((repo) => ({ ...repo, projectId: project.id })) ?? [];
+	if (repos.length > 0) return repos;
+
+	const legacyRepo = createLegacyProjectGitHubRepo(project);
+	return legacyRepo ? [legacyRepo] : [];
 }
 
 type TodoRow = {
@@ -78,6 +109,16 @@ type ProjectRow = {
 	github_repo: string | null;
 	archived: number;
 	archived_at: number | null;
+};
+
+type ProjectGitHubRepoRow = {
+	id: string;
+	project_id: string;
+	full_name: string;
+	owner: string;
+	repo: string;
+	is_primary: number;
+	created_at: number;
 };
 
 type ResourceRow = {
@@ -111,6 +152,7 @@ type FocusStateRow = {
 	pomo_completed_pomodoros: number | null;
 	pomo_paused: number | null;
 	pomo_paused_remaining: number | null;
+	payload_json: string | null;
 };
 
 type FocusSessionRow = {
@@ -441,6 +483,15 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 		)
 		.bind(email)
 		.all<AttachmentRow>();
+	const githubRepoRows = await db
+		.prepare(
+			`SELECT id, project_id, full_name, owner, repo, is_primary, created_at
+			 FROM project_github_repos
+			 WHERE user_email = ?
+			 ORDER BY created_at ASC`
+		)
+		.bind(email)
+		.all<ProjectGitHubRepoRow>();
 
 	const resourcesByProject = new Map<string, Resource[]>();
 	for (const row of resourceRows.results) {
@@ -471,6 +522,22 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 		attachmentsByProject.set(row.project_id, arr);
 	}
 
+	const githubReposByProject = new Map<string, ProjectGitHubRepo[]>();
+	for (const row of githubRepoRows.results) {
+		const repo: ProjectGitHubRepo = {
+			id: row.id,
+			projectId: row.project_id,
+			fullName: row.full_name,
+			owner: row.owner,
+			repo: row.repo,
+			isPrimary: toBool(row.is_primary),
+			createdAt: row.created_at
+		};
+		const arr = githubReposByProject.get(row.project_id) ?? [];
+		arr.push(repo);
+		githubReposByProject.set(row.project_id, arr);
+	}
+
 	return projectRows.results.map((row) => {
 		const project: Project = {
 			id: row.id,
@@ -478,7 +545,18 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 			createdAt: row.created_at
 		};
 		if (row.detail) project.detail = row.detail;
-		if (row.github_repo) project.githubRepo = row.github_repo;
+		const githubRepos = githubReposByProject.get(row.id);
+		if (githubRepos && githubRepos.length > 0) project.githubRepos = githubRepos;
+		else if (row.github_repo) {
+			const legacyRepo = createLegacyProjectGitHubRepo({
+				id: row.id,
+				name: row.name,
+				createdAt: row.created_at,
+				detail: row.detail ?? undefined,
+				githubRepo: row.github_repo
+			} as Project & { githubRepo?: string });
+			if (legacyRepo) project.githubRepos = [legacyRepo];
+		}
 		if (toBool(row.archived)) project.archived = true;
 		if (row.archived_at) project.archivedAt = row.archived_at;
 		const resources = resourcesByProject.get(row.id);
@@ -491,6 +569,7 @@ export async function getProjects(db: D1Database, email: string): Promise<Projec
 
 export async function saveProjects(db: D1Database, email: string, projects: Project[]): Promise<void> {
 	const statements: D1PreparedStatement[] = [
+		db.prepare('DELETE FROM project_github_repos WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM project_resources WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM project_attachments WHERE user_email = ?').bind(email),
 		db.prepare('DELETE FROM projects WHERE user_email = ?').bind(email)
@@ -509,11 +588,32 @@ export async function saveProjects(db: D1Database, email: string, projects: Proj
 					project.name,
 					project.createdAt,
 					project.detail ?? null,
-					project.githubRepo ?? null,
+					null,
 					project.archived ? 1 : 0,
 					project.archivedAt ?? null
 				)
 		);
+
+		for (const repo of project.githubRepos ?? []) {
+			statements.push(
+				db
+					.prepare(
+						`INSERT INTO project_github_repos (
+						 user_email, id, project_id, full_name, owner, repo, is_primary, created_at
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+					)
+					.bind(
+						email,
+						repo.id,
+						project.id,
+						repo.fullName,
+						repo.owner,
+						repo.repo,
+						repo.isPrimary ? 1 : 0,
+						repo.createdAt
+					)
+			);
+		}
 
 		for (const resource of project.resources ?? []) {
 			statements.push(
@@ -710,7 +810,8 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 			 pomo_type,
 			 pomo_completed_pomodoros,
 			 pomo_paused,
-			 pomo_paused_remaining
+			 pomo_paused_remaining,
+			 payload_json
 			 FROM focus_state
 			 WHERE user_email = ?`
 		)
@@ -719,17 +820,23 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 
 	if (!row) return null;
 
-	const focus: FocusState = {
+	if (row.payload_json) {
+		try {
+			return normalizeFocusState(JSON.parse(row.payload_json) as FocusState);
+		} catch {
+			// Fall through to legacy columns.
+		}
+	}
+
+	const legacy: LegacyFocusState = {
 		activeTaskId: row.active_task_id,
 		focusedAt: row.focused_at
 	};
-
-	if (row.session_paused !== null) focus.sessionPaused = toBool(row.session_paused);
-	if (row.paused_at !== null) focus.pausedAt = row.paused_at;
-	if (row.accumulated_pause_ms !== null) focus.accumulatedPauseMs = row.accumulated_pause_ms;
-
+	if (row.session_paused !== null) legacy.sessionPaused = toBool(row.session_paused);
+	if (row.paused_at !== null) legacy.pausedAt = row.paused_at;
+	if (row.accumulated_pause_ms !== null) legacy.accumulatedPauseMs = row.accumulated_pause_ms;
 	if (row.pomo_started_at !== null && row.pomo_duration !== null && row.pomo_type !== null) {
-		focus.pomodoro = {
+		legacy.pomodoro = {
 			startedAt: row.pomo_started_at,
 			duration: row.pomo_duration,
 			type: row.pomo_type,
@@ -738,8 +845,7 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 			pausedRemaining: row.pomo_paused_remaining ?? undefined
 		};
 	}
-
-	return focus;
+	return normalizeFocusState(legacy);
 }
 
 export async function saveFocus(db: D1Database, email: string, focus: FocusState | null): Promise<void> {
@@ -747,6 +853,15 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 		await db.prepare('DELETE FROM focus_state WHERE user_email = ?').bind(email).run();
 		return;
 	}
+
+	const normalized = normalizeFocusState(focus);
+	if (!normalized) {
+		await db.prepare('DELETE FROM focus_state WHERE user_email = ?').bind(email).run();
+		return;
+	}
+
+	const anchorTask =
+		normalized.tasks.find((task) => task.taskId === normalized.expandedTaskId) ?? normalized.tasks[0];
 
 	await db
 		.prepare(
@@ -762,8 +877,9 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			 pomo_type,
 			 pomo_completed_pomodoros,
 			 pomo_paused,
-			 pomo_paused_remaining
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 pomo_paused_remaining,
+			 payload_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(user_email) DO UPDATE SET
 			 active_task_id = excluded.active_task_id,
 			 focused_at = excluded.focused_at,
@@ -775,21 +891,23 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			 pomo_type = excluded.pomo_type,
 			 pomo_completed_pomodoros = excluded.pomo_completed_pomodoros,
 			 pomo_paused = excluded.pomo_paused,
-			 pomo_paused_remaining = excluded.pomo_paused_remaining`
+			 pomo_paused_remaining = excluded.pomo_paused_remaining,
+			 payload_json = excluded.payload_json`
 		)
 		.bind(
 			email,
-			focus.activeTaskId,
-			focus.focusedAt,
-			toDbBool(focus.sessionPaused),
-			focus.pausedAt ?? null,
-			focus.accumulatedPauseMs ?? null,
-			focus.pomodoro?.startedAt ?? null,
-			focus.pomodoro?.duration ?? null,
-			focus.pomodoro?.type ?? null,
-			focus.pomodoro?.completedPomodoros ?? null,
-			toDbBool(focus.pomodoro?.paused),
-			focus.pomodoro?.pausedRemaining ?? null
+			anchorTask.taskId,
+			anchorTask.addedAt,
+			anchorTask.sessionStatus === 'paused' ? 1 : 0,
+			null,
+			anchorTask.sessionElapsedMs,
+			anchorTask.pomodoro?.startedAt ?? null,
+			anchorTask.pomodoro?.duration ?? null,
+			anchorTask.pomodoro?.type ?? null,
+			anchorTask.pomodoro?.completedPomodoros ?? null,
+			toDbBool(anchorTask.pomodoro?.paused),
+			anchorTask.pomodoro?.pausedRemaining ?? null,
+			JSON.stringify(normalized)
 		)
 		.run();
 }
@@ -880,7 +998,7 @@ export async function startSession(db: D1Database, email: string, taskId: string
 export async function getGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string
+	_repoLinkId: string
 ): Promise<GitHubRepoInfo | null> {
 	return null;
 }
@@ -888,7 +1006,7 @@ export async function getGitHubInfo(
 export async function saveGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string,
+	_repoLinkId: string,
 	_info: GitHubRepoInfo
 ): Promise<void> {
 	// GitHub cache remains in KV.
@@ -897,7 +1015,7 @@ export async function saveGitHubInfo(
 export async function deleteGitHubInfo(
 	_db: D1Database,
 	_email: string,
-	_projectId: string
+	_repoLinkId: string
 ): Promise<void> {
 	// GitHub cache remains in KV.
 }
@@ -1056,6 +1174,7 @@ export async function deleteProjectCascadeTx(
 	await db.batch([
 		db.prepare('DELETE FROM project_resources WHERE user_email = ? AND project_id = ?').bind(email, projectId),
 		db.prepare('DELETE FROM project_attachments WHERE user_email = ? AND project_id = ?').bind(email, projectId),
+		db.prepare('DELETE FROM project_github_repos WHERE user_email = ? AND project_id = ?').bind(email, projectId),
 		db.prepare('DELETE FROM projects WHERE user_email = ? AND id = ?').bind(email, projectId),
 		db.prepare('UPDATE todos SET project_id = NULL WHERE user_email = ? AND project_id = ?').bind(email, projectId)
 	]);
