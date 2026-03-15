@@ -4,7 +4,6 @@ import {
 	getTodos,
 	createTodo,
 	deleteTodo,
-	logPomodoro,
 	updateTodo,
 	getSettings,
 	saveSettings,
@@ -27,16 +26,10 @@ import {
 	unarchiveProject,
 	expandFocusTaskTx,
 	focusTaskTx,
+	pauseAllFocusTx,
 	pauseFocusTaskTx,
 	resumeFocusTaskTx,
 	stopFocusTaskTx,
-	startTaskPomodoroTx,
-	pauseTaskPomodoroTx,
-	resumeTaskPomodoroTx,
-	resetTaskPomodoroTx,
-	advanceTaskPomodoroTx,
-	stopTaskPomodoroTx,
-	dismissTaskPomodoroTx,
 	toggleTodoAndHandleFocusTx,
 	deleteProjectCascadeTx
 } from '$lib/storage';
@@ -45,7 +38,6 @@ import {
 	getPrimaryProjectGitHubRepo,
 	type Project,
 	type ProjectGitHubRepo,
-	type UserSettings,
 	type Theme
 } from '$lib/types';
 import { parseGitHubRepo, fetchRepoInfo, fetchReadme, GitHubError } from '$lib/github';
@@ -199,16 +191,6 @@ export const sharedActions: Actions = {
 		});
 	},
 
-	logPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		const type = data.get('type')?.toString() as 'work' | 'short-break' | 'long-break';
-		const duration = Number(data.get('duration'));
-		if (!taskId || !type || !duration) return fail(400);
-		await logPomodoro(env, locals.userEmail, { taskId, type, duration });
-	},
-
 	focusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
@@ -233,6 +215,11 @@ export const sharedActions: Actions = {
 		await pauseFocusTaskTx(env, locals.userEmail, taskId);
 	},
 
+	pauseAllFocus: async ({ locals, platform }) => {
+		const env = platform?.env;
+		await pauseAllFocusTx(env, locals.userEmail);
+	},
+
 	resumeFocusTask: async ({ request, locals, platform }) => {
 		const env = platform?.env;
 		const data = await request.formData();
@@ -253,62 +240,6 @@ export const sharedActions: Actions = {
 		void locals;
 		void platform;
 		return fail(400, { error: 'Unfocus all is no longer supported from the UI' });
-	},
-
-	startTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await startTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	pauseTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await pauseTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	resumeTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await resumeTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	resetTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await resetTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	advanceTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await advanceTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	stopTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await stopTaskPomodoroTx(env, locals.userEmail, taskId);
-	},
-
-	dismissTaskPomodoro: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await dismissTaskPomodoroTx(env, locals.userEmail, taskId);
 	},
 
 	archive: async ({ request, locals, platform }) => {
@@ -341,23 +272,6 @@ export const sharedActions: Actions = {
 		const id = data.get('id')?.toString();
 		if (!id) return fail(400);
 		await unarchiveProject(env, locals.userEmail, id);
-	},
-
-	saveSettings: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const existing = await getSettings(env, locals.userEmail);
-		const clamp = (v: number) => Math.max(1, Math.min(120, v));
-		const workMin = clamp(Number(data.get('work') || 25));
-		const shortBreakMin = clamp(Number(data.get('shortBreak') || 5));
-		const longBreakMin = clamp(Number(data.get('longBreak') || 15));
-		const settings: UserSettings = {
-			...existing,
-			workMs: workMin * 60 * 1000,
-			shortBreakMs: shortBreakMin * 60 * 1000,
-			longBreakMs: longBreakMin * 60 * 1000
-		};
-		await saveSettings(env, locals.userEmail, settings);
 	},
 
 	saveTheme: async ({ request, locals, platform }) => {

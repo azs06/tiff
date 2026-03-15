@@ -2,13 +2,12 @@ import {
 	getTodos,
 	getFocus,
 	getSettings,
-	getPomodoroLogs,
 	getProjects,
 	getSessions,
-	getTimer,
+	getLegacyTimer,
 	saveFocus,
 	saveSessions,
-	saveTimer,
+	clearLegacyTimer,
 	getGitHubInfo,
 	saveGitHubInfo,
 	hasAnyStorage
@@ -16,7 +15,6 @@ import {
 import {
 	DEFAULT_SETTINGS,
 	getPrimaryProjectGitHubRepo,
-	type LegacyFocusState,
 	type GitHubRepoInfo
 } from '$lib/types';
 import { ensureOpenSession, normalizeFocusState } from '$lib/focus';
@@ -24,6 +22,7 @@ import { fetchRepoInfo, isCacheFresh } from '$lib/github';
 
 export async function loadAppData(locals: App.Locals, platform: App.Platform | undefined) {
 	const env = platform?.env;
+	const loadedAt = Date.now();
 
 	if (!hasAnyStorage(env)) {
 		return {
@@ -31,49 +30,40 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 			archivedTodos: [],
 			serverFocus: null,
 			settings: DEFAULT_SETTINGS,
-			pomodoroLogs: [],
 			projects: [],
 			archivedProjects: [],
 			sessions: [],
 			githubInfo: {} as Record<string, GitHubRepoInfo>,
-			hasGithubToken: false
+			hasGithubToken: false,
+			loadedAt
 		};
 	}
 
 	const email = locals.userEmail;
 	const githubToken = env?.GITHUB_TOKEN;
 
-	const [allTodos, serverFocus, settings, pomodoroLogs, projects, storedSessions] = await Promise.all([
+	const [allTodos, serverFocus, settings, projects, storedSessions] = await Promise.all([
 		getTodos(env, email),
 		getFocus(env, email),
 		getSettings(env, email),
-		getPomodoroLogs(env, email),
 		getProjects(env, email),
 		getSessions(env, email)
 	]);
 
-	// Legacy compatibility: convert old TimerState records into FocusState on first read.
+	// Legacy compatibility: convert old standalone timer records into FocusState on first read.
 	let focus = serverFocus;
 	let sessions = storedSessions;
 	let migratedFocus = false;
 	if (!focus) {
-		const oldTimer = await getTimer(env, email);
+		const oldTimer = await getLegacyTimer(env, email);
 		if (oldTimer) {
 			focus = normalizeFocusState({
 				activeTaskId: oldTimer.activeTaskId,
-				focusedAt: oldTimer.startedAt,
-				pomodoro: {
-					startedAt: oldTimer.startedAt,
-					duration: oldTimer.duration,
-					type: oldTimer.type,
-					completedPomodoros: oldTimer.completedPomodoros,
-					paused: oldTimer.paused,
-					pausedRemaining: oldTimer.pausedRemaining
-				}
-			} satisfies LegacyFocusState);
+				focusedAt: oldTimer.startedAt
+			});
 			migratedFocus = true;
 			await saveFocus(env, email, focus);
-			await saveTimer(env, email, null);
+			await clearLegacyTimer(env, email);
 		}
 	}
 
@@ -173,11 +163,11 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 		archivedTodos,
 		serverFocus: focus,
 		settings,
-		pomodoroLogs,
 		projects: activeProjects,
 		archivedProjects,
 		sessions,
 		githubInfo,
-		hasGithubToken: Boolean(githubToken)
+		hasGithubToken: Boolean(githubToken),
+		loadedAt
 	};
 }

@@ -3,13 +3,11 @@ import type {
 	FocusState,
 	GitHubRepoInfo,
 	LegacyFocusState,
-	PomodoroLog,
 	Project,
 	ProjectAttachment,
 	ProjectGitHubRepo,
 	Resource,
 	TaskLog,
-	TimerState,
 	Todo,
 	UserSettings
 } from './types';
@@ -22,21 +20,6 @@ function toBool(value: unknown): boolean {
 	if (typeof value === 'number') return value !== 0;
 	if (typeof value === 'string') return value === '1' || value.toLowerCase() === 'true';
 	return false;
-}
-
-function toNullableNumber(value: unknown): number | undefined {
-	if (typeof value === 'number') return value;
-	return undefined;
-}
-
-function toNullableString(value: unknown): string | undefined {
-	if (typeof value === 'string' && value.length > 0) return value;
-	return undefined;
-}
-
-function toDbBool(value: boolean | undefined): number | null {
-	if (value === undefined) return null;
-	return value ? 1 : 0;
 }
 
 function normalizeProject(project: Project): Project {
@@ -146,12 +129,6 @@ type FocusStateRow = {
 	session_paused: number | null;
 	paused_at: number | null;
 	accumulated_pause_ms: number | null;
-	pomo_started_at: number | null;
-	pomo_duration: number | null;
-	pomo_type: 'work' | 'short-break' | 'long-break' | null;
-	pomo_completed_pomodoros: number | null;
-	pomo_paused: number | null;
-	pomo_paused_remaining: number | null;
 	payload_json: string | null;
 };
 
@@ -161,14 +138,6 @@ type FocusSessionRow = {
 	started_at: number;
 	ended_at: number | null;
 	end_reason: FocusSession['endReason'] | null;
-};
-
-type PomodoroRow = {
-	id: string;
-	task_id: string;
-	type: 'work' | 'short-break' | 'long-break';
-	duration: number;
-	completed_at: number;
 };
 
 type ActiveSessionRow = {
@@ -337,57 +306,15 @@ export async function deleteTodo(db: D1Database, email: string, id: string): Pro
 	]);
 }
 
-export async function getTimer(_db: D1Database, _email: string): Promise<TimerState | null> {
-	return null;
-}
-
-export async function saveTimer(_db: D1Database, _email: string, _timer: TimerState | null): Promise<void> {
-	// Legacy timer state remains in KV for backward compatibility.
-}
-
-export async function logPomodoro(
-	db: D1Database,
-	email: string,
-	entry: Omit<PomodoroLog, 'completedAt'>
-): Promise<void> {
-	await db
-		.prepare('INSERT INTO pomodoro_logs (user_email, id, task_id, type, duration, completed_at) VALUES (?, ?, ?, ?, ?, ?)')
-		.bind(email, crypto.randomUUID(), entry.taskId, entry.type, entry.duration, Date.now())
-		.run();
-}
-
-export async function replacePomodoroLogs(db: D1Database, email: string, logs: PomodoroLog[]): Promise<void> {
-	const statements: D1PreparedStatement[] = [
-		db.prepare('DELETE FROM pomodoro_logs WHERE user_email = ?').bind(email)
-	];
-
-	for (let index = 0; index < logs.length; index += 1) {
-		const log = logs[index];
-		const id = `${log.taskId}:${log.completedAt}:${index}`;
-		statements.push(
-			db
-				.prepare(
-					'INSERT INTO pomodoro_logs (user_email, id, task_id, type, duration, completed_at) VALUES (?, ?, ?, ?, ?, ?)'
-				)
-				.bind(email, id, log.taskId, log.type, log.duration, log.completedAt)
-		);
-	}
-
-	await db.batch(statements);
-}
-
 export async function getSettings(db: D1Database, email: string): Promise<UserSettings> {
 	const row = await db
-		.prepare('SELECT work_ms, short_break_ms, long_break_ms, theme FROM user_settings WHERE user_email = ?')
+		.prepare('SELECT theme FROM user_settings WHERE user_email = ?')
 		.bind(email)
-		.first<{ work_ms: number; short_break_ms: number; long_break_ms: number; theme: string }>();
+		.first<{ theme: string }>();
 
 	if (!row) return DEFAULT_SETTINGS;
 
 	return {
-		workMs: row.work_ms,
-		shortBreakMs: row.short_break_ms,
-		longBreakMs: row.long_break_ms,
 		theme: row.theme as UserSettings['theme']
 	};
 }
@@ -396,14 +323,11 @@ export async function saveSettings(db: D1Database, email: string, settings: User
 	await db
 		.prepare(
 			`INSERT INTO user_settings (user_email, work_ms, short_break_ms, long_break_ms, theme)
-			 VALUES (?, ?, ?, ?, ?)
+			 VALUES (?, NULL, NULL, NULL, ?)
 			 ON CONFLICT(user_email) DO UPDATE SET
-			 work_ms = excluded.work_ms,
-			 short_break_ms = excluded.short_break_ms,
-			 long_break_ms = excluded.long_break_ms,
 			 theme = excluded.theme`
 		)
-		.bind(email, settings.workMs, settings.shortBreakMs, settings.longBreakMs, settings.theme)
+		.bind(email, settings.theme)
 		.run();
 }
 
@@ -419,20 +343,6 @@ export async function unarchiveTodo(db: D1Database, email: string, id: string): 
 		.prepare('UPDATE todos SET archived = 0, archived_at = NULL, done = 0 WHERE user_email = ? AND id = ?')
 		.bind(email, id)
 		.run();
-}
-
-export async function getPomodoroLogs(db: D1Database, email: string): Promise<PomodoroLog[]> {
-	const rows = await db
-		.prepare('SELECT id, task_id, type, duration, completed_at FROM pomodoro_logs WHERE user_email = ? ORDER BY completed_at ASC')
-		.bind(email)
-		.all<PomodoroRow>();
-
-	return rows.results.map((row) => ({
-		taskId: row.task_id,
-		type: row.type,
-		duration: row.duration,
-		completedAt: row.completed_at
-	}));
 }
 
 export async function addTaskLog(db: D1Database, email: string, todoId: string, text: string): Promise<void> {
@@ -805,12 +715,6 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 			 session_paused,
 			 paused_at,
 			 accumulated_pause_ms,
-			 pomo_started_at,
-			 pomo_duration,
-			 pomo_type,
-			 pomo_completed_pomodoros,
-			 pomo_paused,
-			 pomo_paused_remaining,
 			 payload_json
 			 FROM focus_state
 			 WHERE user_email = ?`
@@ -835,16 +739,6 @@ export async function getFocus(db: D1Database, email: string): Promise<FocusStat
 	if (row.session_paused !== null) legacy.sessionPaused = toBool(row.session_paused);
 	if (row.paused_at !== null) legacy.pausedAt = row.paused_at;
 	if (row.accumulated_pause_ms !== null) legacy.accumulatedPauseMs = row.accumulated_pause_ms;
-	if (row.pomo_started_at !== null && row.pomo_duration !== null && row.pomo_type !== null) {
-		legacy.pomodoro = {
-			startedAt: row.pomo_started_at,
-			duration: row.pomo_duration,
-			type: row.pomo_type,
-			completedPomodoros: row.pomo_completed_pomodoros ?? 0,
-			paused: toBool(row.pomo_paused),
-			pausedRemaining: row.pomo_paused_remaining ?? undefined
-		};
-	}
 	return normalizeFocusState(legacy);
 }
 
@@ -872,26 +766,14 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			 session_paused,
 			 paused_at,
 			 accumulated_pause_ms,
-			 pomo_started_at,
-			 pomo_duration,
-			 pomo_type,
-			 pomo_completed_pomodoros,
-			 pomo_paused,
-			 pomo_paused_remaining,
 			 payload_json
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(user_email) DO UPDATE SET
 			 active_task_id = excluded.active_task_id,
 			 focused_at = excluded.focused_at,
 			 session_paused = excluded.session_paused,
 			 paused_at = excluded.paused_at,
 			 accumulated_pause_ms = excluded.accumulated_pause_ms,
-			 pomo_started_at = excluded.pomo_started_at,
-			 pomo_duration = excluded.pomo_duration,
-			 pomo_type = excluded.pomo_type,
-			 pomo_completed_pomodoros = excluded.pomo_completed_pomodoros,
-			 pomo_paused = excluded.pomo_paused,
-			 pomo_paused_remaining = excluded.pomo_paused_remaining,
 			 payload_json = excluded.payload_json`
 		)
 		.bind(
@@ -901,12 +783,6 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			anchorTask.sessionStatus === 'paused' ? 1 : 0,
 			null,
 			anchorTask.sessionElapsedMs,
-			anchorTask.pomodoro?.startedAt ?? null,
-			anchorTask.pomodoro?.duration ?? null,
-			anchorTask.pomodoro?.type ?? null,
-			anchorTask.pomodoro?.completedPomodoros ?? null,
-			toDbBool(anchorTask.pomodoro?.paused),
-			anchorTask.pomodoro?.pausedRemaining ?? null,
 			JSON.stringify(normalized)
 		)
 		.run();
@@ -1053,23 +929,17 @@ export async function focusTaskTx(db: D1Database, email: string, taskId: string)
 		db
 			.prepare(
 				`INSERT INTO focus_state (
-				 user_email, active_task_id, focused_at, session_paused, paused_at, accumulated_pause_ms,
-				 pomo_started_at, pomo_duration, pomo_type, pomo_completed_pomodoros, pomo_paused, pomo_paused_remaining
-				) VALUES (?, ?, ?, 0, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL)
+				 user_email, active_task_id, focused_at, session_paused, paused_at, accumulated_pause_ms, payload_json
+				) VALUES (?, ?, ?, 0, NULL, 0, ?)
 				ON CONFLICT(user_email) DO UPDATE SET
 				 active_task_id = excluded.active_task_id,
 				 focused_at = excluded.focused_at,
 				 session_paused = 0,
 				 paused_at = NULL,
 				 accumulated_pause_ms = 0,
-				 pomo_started_at = NULL,
-				 pomo_duration = NULL,
-				 pomo_type = NULL,
-				 pomo_completed_pomodoros = NULL,
-				 pomo_paused = NULL,
-				 pomo_paused_remaining = NULL`
+				 payload_json = excluded.payload_json`
 			)
-			.bind(email, taskId, now)
+			.bind(email, taskId, now, null)
 	);
 
 	await db.batch(statements);

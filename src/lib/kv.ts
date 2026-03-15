@@ -1,7 +1,5 @@
 import type {
 	Todo,
-	PomodoroLog,
-	TimerState,
 	UserSettings,
 	TaskLog,
 	Resource,
@@ -90,33 +88,10 @@ export async function deleteTodo(kv: KVNamespace, email: string, id: string): Pr
 	await saveTodos(kv, email, todos.filter((t) => t.id !== id));
 }
 
-export async function getTimer(kv: KVNamespace, email: string): Promise<TimerState | null> {
-	const data = await kv.get(`timer:${email}`, 'json');
-	return (data as TimerState) ?? null;
-}
-
-export async function saveTimer(kv: KVNamespace, email: string, timer: TimerState | null): Promise<void> {
-	if (timer === null) {
-		await kv.delete(`timer:${email}`);
-	} else {
-		await kv.put(`timer:${email}`, JSON.stringify(timer));
-	}
-}
-
-export async function logPomodoro(
-	kv: KVNamespace,
-	email: string,
-	entry: Omit<PomodoroLog, 'completedAt'>
-): Promise<void> {
-	const key = `pomodoros:${email}`;
-	const logs = ((await kv.get(key, 'json')) as PomodoroLog[]) ?? [];
-	logs.push({ ...entry, completedAt: Date.now() });
-	await kv.put(key, JSON.stringify(logs));
-}
-
 export async function getSettings(kv: KVNamespace, email: string): Promise<UserSettings> {
 	const data = await kv.get(`settings:${email}`, 'json');
-	return { ...DEFAULT_SETTINGS, ...(data as Partial<UserSettings>) };
+	const theme = (data as Partial<UserSettings> | null)?.theme;
+	return { ...DEFAULT_SETTINGS, ...(theme ? { theme } : {}) };
 }
 
 export async function saveSettings(kv: KVNamespace, email: string, settings: UserSettings): Promise<void> {
@@ -142,11 +117,6 @@ export async function unarchiveTodo(kv: KVNamespace, email: string, id: string):
 		todo.done = false;
 		await saveTodos(kv, email, todos);
 	}
-}
-
-export async function getPomodoroLogs(kv: KVNamespace, email: string): Promise<PomodoroLog[]> {
-	const key = `pomodoros:${email}`;
-	return ((await kv.get(key, 'json')) as PomodoroLog[]) ?? [];
 }
 
 export async function addTaskLog(kv: KVNamespace, email: string, todoId: string, text: string): Promise<void> {
@@ -388,6 +358,30 @@ export async function startSession(kv: KVNamespace, email: string, taskId: strin
 		startedAt: Date.now()
 	});
 	await saveSessions(kv, email, sessions);
+}
+
+type LegacyTimerState = {
+	activeTaskId?: string;
+	startedAt?: number;
+};
+
+export async function getLegacyTimer(
+	kv: KVNamespace,
+	email: string
+): Promise<Required<LegacyTimerState> | null> {
+	const data = await kv.get(`timer:${email}`, 'json');
+	if (!data || typeof data !== 'object') return null;
+
+	const activeTaskId =
+		'activeTaskId' in data && typeof data.activeTaskId === 'string' ? data.activeTaskId : null;
+	const startedAt = 'startedAt' in data && typeof data.startedAt === 'number' ? data.startedAt : null;
+
+	if (!activeTaskId || startedAt === null) return null;
+	return { activeTaskId, startedAt };
+}
+
+export async function clearLegacyTimer(kv: KVNamespace, email: string): Promise<void> {
+	await kv.delete(`timer:${email}`);
 }
 
 // ── GitHub info cache ──

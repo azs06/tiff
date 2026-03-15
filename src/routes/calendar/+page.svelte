@@ -12,7 +12,7 @@
 
 	<section class="view-page" data-label="ACTIVITY">
 		<div class="calendar-page-card">
-			<Calendar pomodoroLogs={data.pomodoroLogs} todos={data.todos} />
+			<Calendar sessions={data.sessions} todos={data.todos} loadedAt={data.loadedAt} />
 		</div>
 	</section>
 </main>
