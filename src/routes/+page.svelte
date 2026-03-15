@@ -358,6 +358,12 @@
 		);
 	}
 
+	function taskRunActionLabel(sessionStatus?: string): string {
+		if (sessionStatus === "running") return "PAUSE";
+		if (sessionStatus === "paused") return "RESUME";
+		return "FOCUS";
+	}
+
 	async function stopTask(taskId: string) {
 		await postAction("stopFocusTask", { taskId });
 	}
@@ -1197,7 +1203,7 @@
 											{/if}
 											{#if !todo.done && focusedTaskIdSet.has(todo.id)}
 												<button onclick={() => toggleTaskRunState(todo.id)}
-													>{getFocusedTask(visibleFocus, todo.id)?.sessionStatus === "running" ? "PAUSE" : "PLAY"}</button
+													>{taskRunActionLabel(getFocusedTask(visibleFocus, todo.id)?.sessionStatus)}</button
 												>
 											{/if}
 											{#if todo.done}
