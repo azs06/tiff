@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { applyAction, enhance } from "$app/forms";
-	import { invalidateAll } from "$app/navigation";
+	import { afterNavigate, invalidateAll, pushState, replaceState } from "$app/navigation";
+	import { page } from "$app/state";
 	import { tick } from "svelte";
 	import type { SubmitFunction } from "@sveltejs/kit";
 	import type { PageData } from "./$types";
@@ -15,6 +16,10 @@
 
 	let { data }: { data: PageData } = $props();
 
+	type TaskHistoryState = Record<string, unknown> & {
+		taskViewTaskId?: string | null;
+	};
+
 	let timezoneOffset = $state(0);
 	let deadlineChoice = $state<"none" | "today" | "tomorrow" | "custom">(
 		"none",
@@ -23,6 +28,7 @@
 	let createProjectId = $state("");
 	let optimisticDoneById = $state<Record<string, boolean>>({});
 	let pendingToggleById = $state<Record<string, boolean>>({});
+	let taskUrlRoutingReady = $state(false);
 
 	let editDetail = $state("");
 	let editDeadlineChoice = $state<"none" | "today" | "tomorrow" | "custom">(
@@ -32,6 +38,10 @@
 
 	$effect(() => {
 		timezoneOffset = new Date().getTimezoneOffset();
+	});
+
+	afterNavigate(() => {
+		taskUrlRoutingReady = true;
 	});
 
 	let createDeadlineValue = $derived(
@@ -125,6 +135,13 @@
 	let effectiveTodoMap = $derived(
 		new Map(effectiveTodos.map((todo) => [todo.id, todo])),
 	);
+	let activeTodoMap = $derived(
+		new Map(
+			effectiveTodos
+				.filter((todo) => !todo.done)
+				.map((todo) => [todo.id, todo]),
+		),
+	);
 	let effectiveFocus = $derived(
 		focus
 			? normalizeFocusState({
@@ -145,13 +162,21 @@
 		}),
 	);
 	let focusedTaskIdSet = $derived(focusTaskIds(visibleFocus));
-	let previewTaskId = $state<string | null>(null);
+	let currentPageUrl = $derived(page.url);
+	let taskHistoryState = $derived(
+		((page.state as TaskHistoryState | null | undefined) ?? {}) as TaskHistoryState,
+	);
+	let requestedTaskId = $derived.by(() => {
+		const historyTaskId = taskHistoryState.taskViewTaskId;
+		if (historyTaskId !== undefined) return historyTaskId ?? null;
+		return new URLSearchParams(currentPageUrl.search).get("task");
+	});
 	let expandedFocusedTask = $derived(
 		visibleFocus ? getExpandedFocusedTask(visibleFocus) : null,
 	);
 	let heroTaskId = $derived(
-		previewTaskId && effectiveTodoMap.has(previewTaskId)
-			? previewTaskId
+		requestedTaskId && activeTodoMap.has(requestedTaskId)
+			? requestedTaskId
 			: expandedFocusedTask?.taskId ?? null,
 	);
 	let heroFocusTask = $derived(
@@ -189,6 +214,40 @@
 		const hero = document.querySelector('.hero-focus');
 		if (!(hero instanceof HTMLElement)) return;
 		hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	function getCurrentTaskUrl() {
+		return new URL(typeof window === "undefined" ? page.url : window.location.href);
+	}
+
+	function buildTaskUrl(taskId: string | null) {
+		const nextUrl = getCurrentTaskUrl();
+		if (taskId) {
+			nextUrl.searchParams.set("task", taskId);
+		} else {
+			nextUrl.searchParams.delete("task");
+		}
+		return nextUrl;
+	}
+
+	function buildTaskHistoryState(taskId: string | null): TaskHistoryState {
+		return {
+			...((page.state as TaskHistoryState | null | undefined) ?? {}),
+			taskViewTaskId: taskId,
+		};
+	}
+
+	function syncTaskUrl(taskId: string | null, mode: "push" | "replace" = "push") {
+		if (!taskUrlRoutingReady) return;
+		const currentUrl = getCurrentTaskUrl();
+		const nextUrl = buildTaskUrl(taskId);
+		const nextState = buildTaskHistoryState(taskId);
+		if (nextUrl.toString() === currentUrl.toString()) return;
+		if (mode === "replace") {
+			replaceState(nextUrl, nextState);
+			return;
+		}
+		pushState(nextUrl, nextState);
 	}
 
 	async function postAction(action: string, values: Record<string, string>) {
@@ -264,25 +323,26 @@
 	};
 
 	async function focusOnTask(taskId: string) {
-		previewTaskId = taskId;
 		await postAction("focusTask", { taskId });
 		await tick();
 		scrollFocusedHeroIntoView();
 	}
 
 	async function expandTask(taskId: string) {
-		previewTaskId = taskId;
+		syncTaskUrl(taskId);
 		await postAction("expandFocusTask", { taskId });
 		await tick();
 		scrollFocusedHeroIntoView();
 	}
 
 	async function openTaskInFocusView(taskId: string) {
-		if (!effectiveTodoMap.has(taskId)) return;
-		previewTaskId = taskId;
+		if (!activeTodoMap.has(taskId)) return;
 		const task = getFocusedTask(visibleFocus, taskId);
+		syncTaskUrl(taskId);
 		if (task) {
-			await expandTask(taskId);
+			await postAction("expandFocusTask", { taskId });
+			await tick();
+			scrollFocusedHeroIntoView();
 			return;
 		}
 		await tick();
@@ -300,6 +360,18 @@
 
 	async function stopTask(taskId: string) {
 		await postAction("stopFocusTask", { taskId });
+	}
+
+	async function closeTaskView() {
+		const taskId = heroTaskId;
+		if (!taskId) return;
+		if (editingTaskId === taskId) {
+			closeEditForm();
+		}
+		if (heroFocusTask?.taskId === taskId) {
+			await stopTask(taskId);
+		}
+		syncTaskUrl(null);
 	}
 
 	let editingTaskId = $state<string | null>(null);
@@ -380,9 +452,12 @@
 	});
 
 	$effect(() => {
-		if (previewTaskId && !effectiveTodoMap.has(previewTaskId)) {
-			previewTaskId = null;
+		if (!taskUrlRoutingReady) return;
+		if (!requestedTaskId || activeTodoMap.has(requestedTaskId)) return;
+		if (editingTaskId === requestedTaskId) {
+			closeEditForm();
 		}
+		syncTaskUrl(null, "replace");
 	});
 
 	function relativeTime(timestamp: number): string {
@@ -614,36 +689,36 @@
 						></button>
 					</form>
 					<h2 class="focus-title">{focusedTodo.title}</h2>
-					<button
-						class="hero-edit-icon"
-						class:active={editingTaskId === focusedTodo.id}
-						onclick={() => toggleEditForm(focusedTodo.id)}
-						aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
-						title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
-					>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
-					{#if heroFocusTask}
 						<button
-							class="hero-pause-icon"
-							class:paused={heroFocusTask.sessionStatus === "paused"}
-							onclick={() => toggleTaskRunState(heroFocusTask.taskId)}
-							aria-label={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-							title={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-						>{heroFocusTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
+							class="hero-edit-icon"
+							class:active={editingTaskId === focusedTodo.id}
+							onclick={() => toggleEditForm(focusedTodo.id)}
+							aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+							title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+						>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
+						{#if heroFocusTask}
+							<button
+								class="hero-pause-icon"
+								class:paused={heroFocusTask.sessionStatus === "paused"}
+								onclick={() => toggleTaskRunState(heroFocusTask.taskId)}
+								aria-label={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+								title={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+							>{heroFocusTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
+						{:else}
+							<button
+								class="hero-pause-icon paused"
+								onclick={() => focusOnTask(focusedTodo.id)}
+								aria-label="Start focus session"
+								title="Start focus session"
+							>▶</button>
+						{/if}
 						<button
-							class="hero-stop-icon"
-							onclick={() => stopTask(heroFocusTask.taskId)}
-							aria-label="Stop session"
-							title="Stop session"
-						>■</button>
-					{:else}
-						<button
-							class="hero-pause-icon paused"
-							onclick={() => focusOnTask(focusedTodo.id)}
-							aria-label="Start focus session"
-							title="Start focus session"
-						>▶</button>
-					{/if}
-				</div>
+							class="hero-close-icon"
+							onclick={closeTaskView}
+							aria-label={heroFocusTask ? "Close task and stop focus" : "Close task"}
+							title={heroFocusTask ? "Close task and stop focus" : "Close task"}
+						>✕</button>
+					</div>
 
 				{#if focusedTodo.detail}
 					<p class="focus-detail">{focusedTodo.detail}</p>

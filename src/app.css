@@ -1941,9 +1941,9 @@ body::after {
 	background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-/* ── Stop icon ── */
+/* ── Close icon ── */
 
-.hero-stop-icon {
+.hero-close-icon {
 	width: 30px;
 	height: 30px;
 	min-width: 30px;
@@ -1960,10 +1960,10 @@ body::after {
 	transition: all 0.15s ease;
 }
 
-.hero-stop-icon:hover {
-	color: var(--danger);
-	border-color: var(--danger);
-	background: color-mix(in srgb, var(--danger) 10%, transparent);
+.hero-close-icon:hover {
+	color: var(--hero-text);
+	border-color: var(--hero-text);
+	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
 }
 
 /* ── Session paused state ── */
@@ -3252,7 +3252,7 @@ button:active:not(.todo-title) {
 /* Hero icon buttons — rounded */
 [data-theme="paper"] .hero-edit-icon,
 [data-theme="paper"] .hero-pause-icon,
-[data-theme="paper"] .hero-stop-icon {
+[data-theme="paper"] .hero-close-icon {
 	border-radius: 6px;
 }
 
@@ -3610,23 +3610,18 @@ button:active:not(.todo-title) {
 /* Hero icon buttons — clean */
 [data-theme="nothing"] .hero-edit-icon,
 [data-theme="nothing"] .hero-pause-icon,
-[data-theme="nothing"] .hero-stop-icon {
+[data-theme="nothing"] .hero-close-icon {
 	border-color: var(--border-color);
 	color: var(--text-muted);
 	border-radius: 6px;
 }
 
 [data-theme="nothing"] .hero-edit-icon:hover,
-[data-theme="nothing"] .hero-pause-icon:hover {
+[data-theme="nothing"] .hero-pause-icon:hover,
+[data-theme="nothing"] .hero-close-icon:hover {
 	background: var(--bg-surface);
 	color: var(--text-primary);
 	border-color: var(--border-color);
-}
-
-[data-theme="nothing"] .hero-stop-icon:hover {
-	background: var(--bg-surface);
-	color: var(--danger);
-	border-color: var(--danger);
 }
 
 [data-theme="nothing"] .hero-edit-icon.active {
@@ -3932,7 +3927,7 @@ button:active:not(.todo-title) {
 
 	.hero-edit-icon,
 	.hero-pause-icon,
-	.hero-stop-icon {
+	.hero-close-icon {
 		width: 26px;
 		height: 26px;
 		min-width: 26px;
