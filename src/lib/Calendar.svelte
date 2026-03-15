@@ -1,7 +1,11 @@
 <script lang="ts">
-	import type { PomodoroLog, Todo } from './types';
+	import type { FocusSession, Todo } from './types';
 
-	let { pomodoroLogs, todos }: { pomodoroLogs: PomodoroLog[]; todos: Todo[] } = $props();
+	let {
+		sessions,
+		todos,
+		loadedAt
+	}: { sessions: FocusSession[]; todos: Todo[]; loadedAt: number } = $props();
 
 	const MONTHS_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 	const WEEKDAY_TICKS = ['', 'MON', '', 'WED', '', 'FRI', ''];
@@ -12,7 +16,7 @@
 
 	type DayCell = {
 		isInYear: boolean;
-		count: number;
+		focusMs: number;
 		level: 0 | 1 | 2 | 3 | 4;
 		hasDeadline: boolean;
 		isToday: boolean;
@@ -40,27 +44,49 @@
 		return year === now.getFullYear() && month === now.getMonth() && day === now.getDate();
 	}
 
-	function getLevel(count: number, max: number): 0 | 1 | 2 | 3 | 4 {
-		if (count <= 0) return 0;
-		if (max <= 4) return Math.min(4, count) as 1 | 2 | 3 | 4;
+	function formatDuration(ms: number): string {
+		const totalMin = Math.round(ms / 60_000);
+		if (totalMin < 60) return `${totalMin}m`;
+		const h = Math.floor(totalMin / 60);
+		const m = totalMin % 60;
+		return m > 0 ? `${h}h ${m}m` : `${h}h`;
+	}
+
+	function getLevel(focusMs: number, max: number): 0 | 1 | 2 | 3 | 4 {
+		if (focusMs <= 0) return 0;
+		if (max <= 60 * 60 * 1000) {
+			return Math.min(4, Math.ceil(focusMs / (15 * 60 * 1000))) as 1 | 2 | 3 | 4;
+		}
 
 		const q1 = Math.ceil(max * 0.25);
 		const q2 = Math.ceil(max * 0.5);
 		const q3 = Math.ceil(max * 0.75);
 
-		if (count <= q1) return 1;
-		if (count <= q2) return 2;
-		if (count <= q3) return 3;
+		if (focusMs <= q1) return 1;
+		if (focusMs <= q2) return 2;
+		if (focusMs <= q3) return 3;
 		return 4;
 	}
 
-	let pomoCounts = $derived.by(() => {
+	function addSessionDurationByDay(map: Map<string, number>, startedAt: number, endedAt: number) {
+		let cursor = startedAt;
+		while (cursor < endedAt) {
+			const current = new Date(cursor);
+			const dayEnd = new Date(current);
+			dayEnd.setHours(24, 0, 0, 0);
+			const sliceEnd = Math.min(endedAt, dayEnd.getTime());
+			const key = toDateKey(current.getFullYear(), current.getMonth(), current.getDate());
+			map.set(key, (map.get(key) ?? 0) + Math.max(0, sliceEnd - cursor));
+			cursor = sliceEnd;
+		}
+	}
+
+	let focusByDay = $derived.by(() => {
 		const map = new Map<string, number>();
-		for (const log of pomodoroLogs) {
-			if (log.type !== 'work') continue;
-			const d = new Date(log.completedAt);
-			const key = toDateKey(d.getFullYear(), d.getMonth(), d.getDate());
-			map.set(key, (map.get(key) ?? 0) + 1);
+		for (const session of sessions) {
+			const endedAt = session.endedAt ?? loadedAt;
+			if (endedAt <= session.startedAt) continue;
+			addSessionDurationByDay(map, session.startedAt, endedAt);
 		}
 		return map;
 	});
@@ -76,18 +102,18 @@
 		return set;
 	});
 
-	let yearMaxCount = $derived.by(() => {
+	let yearMaxFocus = $derived.by(() => {
 		let max = 0;
-		for (const [key, count] of pomoCounts) {
-			if (key.startsWith(`${viewYear}-`) && count > max) max = count;
+		for (const [key, focusMs] of focusByDay) {
+			if (key.startsWith(`${viewYear}-`) && focusMs > max) max = focusMs;
 		}
 		return max;
 	});
 
-	let yearTotal = $derived.by(() => {
+	let yearTotalFocus = $derived.by(() => {
 		let total = 0;
-		for (const [key, count] of pomoCounts) {
-			if (key.startsWith(`${viewYear}-`)) total += count;
+		for (const [key, focusMs] of focusByDay) {
+			if (key.startsWith(`${viewYear}-`)) total += focusMs;
 		}
 		return total;
 	});
@@ -106,13 +132,13 @@
 				const year = cursor.getFullYear();
 				const month = cursor.getMonth();
 				const day = cursor.getDate();
-				const count = pomoCounts.get(toDateKey(year, month, day)) ?? 0;
+				const focusMs = focusByDay.get(toDateKey(year, month, day)) ?? 0;
 				const inYear = year === viewYear;
 
 				week.push({
 					isInYear: inYear,
-					count,
-					level: getLevel(count, yearMaxCount),
+					focusMs,
+					level: getLevel(focusMs, yearMaxFocus),
 					hasDeadline: deadlineDates.has(toDateKey(year, month, day)),
 					isToday: isToday(year, month, day),
 					dateLabel: dayFormatter.format(cursor)
@@ -155,7 +181,7 @@
 	<button onclick={next} aria-label="Next year">&gt;</button>
 </div>
 
-<div class="gh-summary">{yearTotal} WORK SESSIONS</div>
+<div class="gh-summary">{formatDuration(yearTotalFocus)} FOCUSED</div>
 
 <div class="gh-scroll" style={`--weeks: ${weeksData.weeks.length};`}>
 	<div class="gh-month-row">
@@ -185,8 +211,8 @@
 							class:outside-year={!cell.isInYear}
 							class:today={cell.isToday}
 							class:has-deadline={cell.hasDeadline}
-							title={`${cell.dateLabel}: ${cell.count} work session${cell.count === 1 ? '' : 's'}${cell.hasDeadline ? ' - deadline' : ''}`}
-							aria-label={`${cell.dateLabel}: ${cell.count} work session${cell.count === 1 ? '' : 's'}${cell.hasDeadline ? ', deadline' : ''}`}
+							title={`${cell.dateLabel}: ${formatDuration(cell.focusMs)} focused${cell.hasDeadline ? ' - deadline' : ''}`}
+							aria-label={`${cell.dateLabel}: ${formatDuration(cell.focusMs)} focused${cell.hasDeadline ? ', deadline' : ''}`}
 						></div>
 					{/each}
 				</div>

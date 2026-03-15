@@ -1,21 +1,24 @@
 <script lang="ts">
-	import { enhance } from "$app/forms";
-	import { invalidateAll } from "$app/navigation";
+	import { applyAction, enhance } from "$app/forms";
+	import { afterNavigate, invalidateAll, pushState, replaceState } from "$app/navigation";
+	import { page } from "$app/state";
 	import { tick } from "svelte";
+	import type { SubmitFunction } from "@sveltejs/kit";
 	import type { PageData } from "./$types";
-	import type { PomodoroLog, FocusSession } from "$lib/types";
+	import type { FocusSession } from "$lib/types";
 	import {
 		focusTaskIds,
-		getDisplayTimer,
 		getExpandedFocusedTask,
 		getFocusedTask,
-		getPomodoroRemaining,
 		getSessionElapsed,
-		hasExpiredPomodoro,
 		normalizeFocusState,
 	} from "$lib/focus";
 
 	let { data }: { data: PageData } = $props();
+
+	type TaskHistoryState = Record<string, unknown> & {
+		taskViewTaskId?: string | null;
+	};
 
 	let timezoneOffset = $state(0);
 	let deadlineChoice = $state<"none" | "today" | "tomorrow" | "custom">(
@@ -23,6 +26,9 @@
 	);
 	let customDeadline = $state("");
 	let createProjectId = $state("");
+	let optimisticDoneById = $state<Record<string, boolean>>({});
+	let pendingToggleById = $state<Record<string, boolean>>({});
+	let taskUrlRoutingReady = $state(false);
 
 	let editDetail = $state("");
 	let editDeadlineChoice = $state<"none" | "today" | "tomorrow" | "custom">(
@@ -32,6 +38,10 @@
 
 	$effect(() => {
 		timezoneOffset = new Date().getTimezoneOffset();
+	});
+
+	afterNavigate(() => {
+		taskUrlRoutingReady = true;
 	});
 
 	let createDeadlineValue = $derived(
@@ -51,8 +61,30 @@
 				? "tomorrow"
 				: editDeadlineChoice === "custom"
 					? editCustomDeadline
-					: "",
+			: "",
 	);
+
+	function withoutToggleKey(source: Record<string, boolean>, id: string) {
+		const next = { ...source };
+		delete next[id];
+		return next;
+	}
+
+	function setOptimisticDone(id: string, done: boolean | null) {
+		if (done === null) {
+			optimisticDoneById = withoutToggleKey(optimisticDoneById, id);
+			return;
+		}
+		optimisticDoneById = { ...optimisticDoneById, [id]: done };
+	}
+
+	function setPendingToggle(id: string, pending: boolean) {
+		if (!pending) {
+			pendingToggleById = withoutToggleKey(pendingToggleById, id);
+			return;
+		}
+		pendingToggleById = { ...pendingToggleById, [id]: true };
+	}
 
 	function formatDeadline(ms: number): string {
 		const d = new Date(ms);
@@ -82,21 +114,7 @@
 		return Date.now() > ms;
 	}
 
-	const DETAIL_HISTORY_KEY = "tiffTaskCallout";
 	const FOCUS_ACCORDION_DEFAULT = new Set(["recent"]);
-
-	function parseTaskHash(hash: string): string | null {
-		const match = /^#task\/(.+)$/.exec(hash);
-		return match ? decodeURIComponent(match[1]) : null;
-	}
-
-	function serializeTaskHash(taskId: string): string {
-		return `#task/${encodeURIComponent(taskId)}`;
-	}
-
-	function getPageUrl(hash = ""): string {
-		return `${window.location.pathname}${window.location.search}${hash}`;
-	}
 
 	let now = $state(Date.now());
 
@@ -108,26 +126,74 @@
 	});
 
 	let focus = $derived(normalizeFocusState(data.serverFocus));
+	let effectiveTodos = $derived(
+		data.todos.map((todo) => {
+			const optimisticDone = optimisticDoneById[todo.id];
+			return optimisticDone === undefined ? todo : { ...todo, done: optimisticDone };
+		}),
+	);
+	let effectiveTodoMap = $derived(
+		new Map(effectiveTodos.map((todo) => [todo.id, todo])),
+	);
+	let activeTodoMap = $derived(
+		new Map(
+			effectiveTodos
+				.filter((todo) => !todo.done)
+				.map((todo) => [todo.id, todo]),
+		),
+	);
+	let effectiveFocus = $derived(
+		focus
+			? normalizeFocusState({
+					expandedTaskId: focus.expandedTaskId,
+					tasks: focus.tasks.filter((task) => {
+						const todo = effectiveTodoMap.get(task.taskId);
+						return todo !== undefined && !todo.done;
+					}),
+				})
+			: null,
+	);
 	let visibleFocus = $derived(
 		normalizeFocusState({
-			expandedTaskId: focus?.expandedTaskId ?? null,
-			tasks: (focus?.tasks ?? []).filter((task) =>
-				data.todos.some((todo) => todo.id === task.taskId),
+			expandedTaskId: effectiveFocus?.expandedTaskId ?? null,
+			tasks: (effectiveFocus?.tasks ?? []).filter((task) =>
+				effectiveTodoMap.has(task.taskId),
 			),
 		}),
 	);
 	let focusedTaskIdSet = $derived(focusTaskIds(visibleFocus));
+	let currentPageUrl = $derived(page.url);
+	let taskHistoryState = $derived(
+		((page.state as TaskHistoryState | null | undefined) ?? {}) as TaskHistoryState,
+	);
+	let requestedTaskId = $derived.by(() => {
+		const historyTaskId = taskHistoryState.taskViewTaskId;
+		if (historyTaskId !== undefined) return historyTaskId ?? null;
+		return new URLSearchParams(currentPageUrl.search).get("task");
+	});
 	let expandedFocusedTask = $derived(
 		visibleFocus ? getExpandedFocusedTask(visibleFocus) : null,
 	);
+	let heroTaskId = $derived(
+		requestedTaskId && activeTodoMap.has(requestedTaskId)
+			? requestedTaskId
+			: expandedFocusedTask?.taskId ?? null,
+	);
+	let heroFocusTask = $derived(
+		heroTaskId ? getFocusedTask(visibleFocus, heroTaskId) : null,
+	);
 	let collapsedFocusedTasks = $derived(
-		visibleFocus?.tasks.filter((task) => task.taskId !== expandedFocusedTask?.taskId) ?? [],
+		visibleFocus?.tasks.filter((task) => task.taskId !== heroFocusTask?.taskId) ?? [],
 	);
 	let focusedTodo = $derived(
-		expandedFocusedTask
-			? data.todos.find((todo) => todo.id === expandedFocusedTask.taskId) ?? null
+		heroTaskId
+			? effectiveTodoMap.get(heroTaskId) ?? null
 			: null,
 	);
+	let hasRunningFocus = $derived(
+		(visibleFocus?.tasks ?? []).some((task) => task.sessionStatus === "running"),
+	);
+	let teardownPauseSent = $state(false);
 
 	function formatElapsed(ms: number): string {
 		const totalSeconds = Math.floor(ms / 1000);
@@ -140,43 +206,48 @@
 		return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 	}
 
-	let pomoLabel = $derived(
-		expandedFocusedTask?.pomodoro
-			? expandedFocusedTask.pomodoro.type === "work"
-				? "WORK"
-				: expandedFocusedTask.pomodoro.type === "short-break"
-					? "SHORT BREAK"
-					: "LONG BREAK"
-			: "",
-	);
-
-	let cyclesFilled = $derived(
-		expandedFocusedTask?.pomodoro
-			? expandedFocusedTask.pomodoro.completedPomodoros % 4
-			: 0,
-	);
-
 	let sessionElapsed = $derived(
-		expandedFocusedTask ? getSessionElapsed(expandedFocusedTask, now) : 0,
+		heroFocusTask ? getSessionElapsed(heroFocusTask, now) : 0,
 	);
-	let pomoRemaining = $derived(
-		expandedFocusedTask ? getPomodoroRemaining(expandedFocusedTask, now) : 0,
-	);
-	let pomoExpired = $derived(
-		expandedFocusedTask ? hasExpiredPomodoro(expandedFocusedTask, now) : false,
-	);
-
-	function formatTime(ms: number): string {
-		const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-		const minutes = Math.floor(totalSeconds / 60);
-		const seconds = totalSeconds % 60;
-		return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-	}
 
 	function scrollFocusedHeroIntoView() {
 		const hero = document.querySelector('.hero-focus');
 		if (!(hero instanceof HTMLElement)) return;
 		hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	function getCurrentTaskUrl() {
+		return new URL(typeof window === "undefined" ? page.url : window.location.href);
+	}
+
+	function buildTaskUrl(taskId: string | null) {
+		const nextUrl = getCurrentTaskUrl();
+		if (taskId) {
+			nextUrl.searchParams.set("task", taskId);
+		} else {
+			nextUrl.searchParams.delete("task");
+		}
+		return nextUrl;
+	}
+
+	function buildTaskHistoryState(taskId: string | null): TaskHistoryState {
+		return {
+			...((page.state as TaskHistoryState | null | undefined) ?? {}),
+			taskViewTaskId: taskId,
+		};
+	}
+
+	function syncTaskUrl(taskId: string | null, mode: "push" | "replace" = "push") {
+		if (!taskUrlRoutingReady) return;
+		const currentUrl = getCurrentTaskUrl();
+		const nextUrl = buildTaskUrl(taskId);
+		const nextState = buildTaskHistoryState(taskId);
+		if (nextUrl.toString() === currentUrl.toString()) return;
+		if (mode === "replace") {
+			replaceState(nextUrl, nextState);
+			return;
+		}
+		pushState(nextUrl, nextState);
 	}
 
 	async function postAction(action: string, values: Record<string, string>) {
@@ -197,6 +268,60 @@
 		await invalidateAll();
 	}
 
+	function sendPauseAllFocusOnTeardown() {
+		if (teardownPauseSent || !hasRunningFocus) return;
+		teardownPauseSent = true;
+
+		try {
+			if (navigator.sendBeacon?.("?/pauseAllFocus", new FormData())) return;
+		} catch {
+			// Fall through to keepalive fetch when beacon fails.
+		}
+
+		try {
+			void fetch("?/pauseAllFocus", {
+				method: "POST",
+				body: new FormData(),
+				keepalive: true,
+			});
+		} catch {
+			// Ignore teardown delivery failures; unload persistence is best-effort.
+		}
+	}
+
+	const enhanceToggle: SubmitFunction = ({ formData, cancel }) => {
+		const id = formData.get("id")?.toString();
+		if (!id) return;
+
+		const todo = effectiveTodoMap.get(id);
+		if (!todo) {
+			cancel();
+			return;
+		}
+
+		if (pendingToggleById[id]) {
+			cancel();
+			return;
+		}
+
+		setOptimisticDone(id, !todo.done);
+		setPendingToggle(id, true);
+
+		return async ({ result, update }) => {
+			try {
+				if (result.type === "success") {
+					await update({ reset: false });
+					return;
+				}
+
+				await applyAction(result);
+			} finally {
+				setOptimisticDone(id, null);
+				setPendingToggle(id, false);
+			}
+		};
+	};
+
 	async function focusOnTask(taskId: string) {
 		await postAction("focusTask", { taskId });
 		await tick();
@@ -204,7 +329,22 @@
 	}
 
 	async function expandTask(taskId: string) {
+		syncTaskUrl(taskId);
 		await postAction("expandFocusTask", { taskId });
+		await tick();
+		scrollFocusedHeroIntoView();
+	}
+
+	async function openTaskInFocusView(taskId: string) {
+		if (!activeTodoMap.has(taskId)) return;
+		const task = getFocusedTask(visibleFocus, taskId);
+		syncTaskUrl(taskId);
+		if (task) {
+			await postAction("expandFocusTask", { taskId });
+			await tick();
+			scrollFocusedHeroIntoView();
+			return;
+		}
 		await tick();
 		scrollFocusedHeroIntoView();
 	}
@@ -218,109 +358,26 @@
 		);
 	}
 
+	function taskRunActionLabel(sessionStatus?: string): string {
+		if (sessionStatus === "running") return "PAUSE";
+		if (sessionStatus === "paused") return "RESUME";
+		return "FOCUS";
+	}
+
 	async function stopTask(taskId: string) {
 		await postAction("stopFocusTask", { taskId });
 	}
 
-	async function startPomodoro(taskId: string) {
-		await postAction("startTaskPomodoro", { taskId });
-	}
-
-	async function pomoPause(taskId: string) {
-		await postAction("pauseTaskPomodoro", { taskId });
-	}
-
-	async function pomoResume(taskId: string) {
-		await postAction("resumeTaskPomodoro", { taskId });
-	}
-
-	async function pomoReset(taskId: string) {
-		await postAction("resetTaskPomodoro", { taskId });
-	}
-
-	async function pomoAdvance(taskId: string) {
-		await postAction("advanceTaskPomodoro", { taskId });
-	}
-
-	async function pomoStop(taskId: string) {
-		await postAction("stopTaskPomodoro", { taskId });
-	}
-
-	async function pomoDismiss(taskId: string) {
-		await postAction("dismissTaskPomodoro", { taskId });
-	}
-
-	let detailTaskId = $state<string | null>(null);
-	let detailOpenedFromSession = $state(false);
-	let detailCloseButton = $state<HTMLButtonElement | null>(null);
-	let lastDetailTrigger: HTMLElement | null = null;
-
-	let detailTodo = $derived(
-		detailTaskId
-			? ([...data.todos, ...data.archivedTodos].find(
-					(t) => t.id === detailTaskId,
-				) ?? null)
-			: null,
-	);
-	let detailOpen = $derived(detailTodo !== null);
-
-	function hasKnownTask(taskId: string | null): taskId is string {
-		return !!taskId && [...data.todos, ...data.archivedTodos].some((t) => t.id === taskId);
-	}
-
-	function syncDetailFromHash(options?: { restoreFocusOnClose?: boolean }) {
-		const restoreFocusOnClose = options?.restoreFocusOnClose ?? false;
-		const previousTaskId = detailTaskId;
-		const nextTaskId = parseTaskHash(window.location.hash);
-		detailTaskId = hasKnownTask(nextTaskId) ? nextTaskId : null;
-		detailOpenedFromSession = Boolean(window.history.state?.[DETAIL_HISTORY_KEY]);
-		if (restoreFocusOnClose && previousTaskId && !detailTaskId) {
-			restoreDetailTriggerFocus();
+	async function closeTaskView() {
+		const taskId = heroTaskId;
+		if (!taskId) return;
+		if (editingTaskId === taskId) {
+			closeEditForm();
 		}
-	}
-
-	function rememberDetailTrigger(trigger?: EventTarget | null) {
-		if (trigger instanceof HTMLElement) {
-			lastDetailTrigger = trigger;
+		if (heroFocusTask?.taskId === taskId) {
+			await stopTask(taskId);
 		}
-	}
-
-	function restoreDetailTriggerFocus() {
-		const nextFocusTarget = lastDetailTrigger;
-		lastDetailTrigger = null;
-		if (!nextFocusTarget) return;
-		tick().then(() => {
-			nextFocusTarget.focus();
-		});
-	}
-
-	function openDetail(todoId: string, trigger?: EventTarget | null) {
-		if (!hasKnownTask(todoId)) return;
-		rememberDetailTrigger(trigger);
-		const nextHash = serializeTaskHash(todoId);
-		if (window.location.hash === nextHash && detailTaskId === todoId) return;
-		const nextState = { ...(window.history.state ?? {}), [DETAIL_HISTORY_KEY]: true };
-		if (detailOpen) {
-			window.history.replaceState(nextState, "", getPageUrl(nextHash));
-		} else {
-			window.history.pushState(nextState, "", getPageUrl(nextHash));
-		}
-		detailTaskId = todoId;
-		detailOpenedFromSession = true;
-	}
-
-	function closeDetail(options?: { restoreFocus?: boolean }) {
-		if (!detailOpen) return;
-		const restoreFocus = options?.restoreFocus ?? true;
-		if (restoreFocus) restoreDetailTriggerFocus();
-		if (detailOpenedFromSession && window.history.state?.[DETAIL_HISTORY_KEY]) {
-			window.history.back();
-			return;
-		}
-		const nextState = { ...(window.history.state ?? {}) };
-		delete nextState[DETAIL_HISTORY_KEY];
-		window.history.replaceState(nextState, "", getPageUrl());
-		syncDetailFromHash();
+		syncTaskUrl(null);
 	}
 
 	let editingTaskId = $state<string | null>(null);
@@ -395,34 +452,19 @@
 	}
 
 	$effect(() => {
-		if (!detailTaskId) return;
-		if (hasKnownTask(detailTaskId)) return;
-		closeDetail({ restoreFocus: false });
-	});
-
-	$effect(() => {
 		if (editingTaskId && !data.todos.some((t) => t.id === editingTaskId)) {
 			editingTaskId = null;
 		}
 	});
 
-	function renderMarkdown(text: string): string {
-		return text
-			.replace(/&/g, "&amp;")
-			.replace(/</g, "&lt;")
-			.replace(/>/g, "&gt;")
-			.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-			.replace(/\*(.+?)\*/g, "<em>$1</em>")
-			.replace(/`(.+?)`/g, "<code>$1</code>")
-			.replace(/~~(.+?)~~/g, "<del>$1</del>")
-			.replace(
-				/\[(.+?)\]\((.+?)\)/g,
-				'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-			)
-			.replace(/^- (.+)$/gm, "<li>$1</li>")
-			.replace(/(<li>.*<\/li>)/s, "<ul>$1</ul>")
-			.replace(/\n/g, "<br>");
-	}
+	$effect(() => {
+		if (!taskUrlRoutingReady) return;
+		if (!requestedTaskId || activeTodoMap.has(requestedTaskId)) return;
+		if (editingTaskId === requestedTaskId) {
+			closeEditForm();
+		}
+		syncTaskUrl(null, "replace");
+	});
 
 	function relativeTime(timestamp: number): string {
 		const diff = Date.now() - timestamp;
@@ -435,12 +477,6 @@
 		return `${days}d ago`;
 	}
 
-	function getTaskPomodoros(taskId: string): PomodoroLog[] {
-		return data.pomodoroLogs.filter(
-			(l: PomodoroLog) => l.taskId === taskId && l.type === "work",
-		);
-	}
-
 	function formatDuration(ms: number): string {
 		const totalMin = Math.round(ms / 60_000);
 		if (totalMin < 60) return `${totalMin}m`;
@@ -449,17 +485,21 @@
 		return m > 0 ? `${h}h ${m}m` : `${h}h`;
 	}
 
-	function pomodoroSummary(taskId: string): string | null {
-		const logs = getTaskPomodoros(taskId);
-		if (logs.length === 0) return null;
-		const total = logs.reduce((sum, l) => sum + l.duration, 0);
-		return `${logs.length} pomo${logs.length !== 1 ? "s" : ""} · ${formatDuration(total)}`;
-	}
-
 	function getTaskSessions(taskId: string): FocusSession[] {
 		return data.sessions.filter(
 			(s: FocusSession) => s.taskId === taskId && s.endedAt,
 		);
+	}
+
+	function sessionSummary(taskId: string): string | null {
+		const sessions = getTaskSessions(taskId);
+		if (sessions.length === 0) return null;
+		return `${sessions.length} session${sessions.length !== 1 ? "s" : ""}`;
+	}
+
+	function averageSessionDuration(totalFocusMs: number, sessions: FocusSession[]): string {
+		if (sessions.length === 0 || totalFocusMs <= 0) return "None";
+		return formatDuration(totalFocusMs / sessions.length);
 	}
 
 	function sessionDuration(session: FocusSession): number {
@@ -520,9 +560,6 @@
 	let focusedSessions = $derived(
 		focusedTodo ? getTaskSessions(focusedTodo.id) : [],
 	);
-	let focusedPomodoros = $derived(
-		focusedTodo ? getTaskPomodoros(focusedTodo.id) : [],
-	);
 	let focusedLogCount = $derived(focusedTodo?.logs?.length ?? 0);
 	let focusAccordionTaskId = $state<string | null>(null);
 	let openFocusAccordions = $state(new Set<string>());
@@ -547,7 +584,7 @@
 	let todoGroups = $derived(() => {
 		const groups: { name: string; todos: typeof data.todos }[] = [];
 		const map = new Map<string, typeof data.todos>();
-		for (const todo of data.todos) {
+		for (const todo of effectiveTodos) {
 			const key = todo.projectId ?? '';
 			if (!map.has(key)) map.set(key, []);
 			map.get(key)!.push(todo);
@@ -565,31 +602,30 @@
 	});
 
 	$effect(() => {
-		syncDetailFromHash();
-		const onHashChange = () => syncDetailFromHash({ restoreFocusOnClose: true });
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
+		if (!hasRunningFocus) {
+			teardownPauseSent = false;
+			return;
+		}
+
+		const onBeforeUnload = () => {
+			sendPauseAllFocusOnTeardown();
+		};
+		const onPageHide = (event: PageTransitionEvent) => {
+			if (event.persisted) return;
+			sendPauseAllFocusOnTeardown();
+		};
+
+		window.addEventListener("beforeunload", onBeforeUnload);
+		window.addEventListener("pagehide", onPageHide);
+		return () => {
+			window.removeEventListener("beforeunload", onBeforeUnload);
+			window.removeEventListener("pagehide", onPageHide);
+		};
 	});
 
-	$effect(() => {
-		if (!detailOpen) return;
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = "hidden";
-		tick().then(() => detailCloseButton?.focus());
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			closeDetail();
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.body.style.overflow = previousOverflow;
-			window.removeEventListener("keydown", onKeyDown);
-		};
-	});
 </script>
 
-<div class="home-layout" class:detail-open={detailOpen}>
+<div class="home-layout">
 	<main class="main-content">
 			<header class="main-header home-header">
 				<span class="tagline">Todo in your focus</span>
@@ -598,7 +634,7 @@
 		{#if collapsedFocusedTasks.length > 0}
 			<section class="focus-stack" aria-label="Focused task stack">
 				{#each collapsedFocusedTasks as task (task.taskId)}
-					{@const taskTodo = data.todos.find((todo) => todo.id === task.taskId)}
+					{@const taskTodo = effectiveTodoMap.get(task.taskId)}
 					{#if taskTodo}
 						<div class="focus-stack-row">
 							<button
@@ -608,9 +644,7 @@
 								aria-label={`Expand ${taskTodo.title}`}
 							>
 								<span class="focus-stack-timer">
-									{task.pomodoro
-										? formatTime(getDisplayTimer(task, now))
-										: formatElapsed(getDisplayTimer(task, now))}
+									{formatElapsed(getSessionElapsed(task, now))}
 								</span>
 								<span class="focus-stack-title">{taskTodo.title}</span>
 							</button>
@@ -634,7 +668,7 @@
 			</section>
 		{/if}
 
-		{#if expandedFocusedTask && focusedTodo}
+		{#if focusedTodo}
 			<section class="hero-focus">
 				<div class="focus-top-bar">
 					<span class="focus-project"
@@ -649,37 +683,48 @@
 						method="POST"
 						action="?/toggle"
 						class="toggle-form"
-						use:enhance
+						use:enhance={enhanceToggle}
 					>
 						<input type="hidden" name="id" value={focusedTodo.id} />
 						<button
 							type="submit"
 							class="hero-toggle-btn"
 							aria-label="Mark task done"
+							disabled={Boolean(pendingToggleById[focusedTodo.id])}
+							aria-busy={Boolean(pendingToggleById[focusedTodo.id])}
 						></button>
 					</form>
 					<h2 class="focus-title">{focusedTodo.title}</h2>
-					<button
-						class="hero-edit-icon"
-						class:active={editingTaskId === focusedTodo.id}
-						onclick={() => toggleEditForm(focusedTodo.id)}
-						aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
-						title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
-					>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
-					<button
-						class="hero-pause-icon"
-						class:paused={expandedFocusedTask.sessionStatus === "paused"}
-						onclick={() => toggleTaskRunState(expandedFocusedTask.taskId)}
-						aria-label={expandedFocusedTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-						title={expandedFocusedTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-					>{expandedFocusedTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
-					<button
-						class="hero-stop-icon"
-						onclick={() => stopTask(expandedFocusedTask.taskId)}
-						aria-label="Stop session"
-						title="Stop session"
-					>■</button>
-				</div>
+						<button
+							class="hero-edit-icon"
+							class:active={editingTaskId === focusedTodo.id}
+							onclick={() => toggleEditForm(focusedTodo.id)}
+							aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+							title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
+						>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
+						{#if heroFocusTask}
+							<button
+								class="hero-pause-icon"
+								class:paused={heroFocusTask.sessionStatus === "paused"}
+								onclick={() => toggleTaskRunState(heroFocusTask.taskId)}
+								aria-label={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+								title={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
+							>{heroFocusTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
+						{:else}
+							<button
+								class="hero-pause-icon paused"
+								onclick={() => focusOnTask(focusedTodo.id)}
+								aria-label="Start focus session"
+								title="Start focus session"
+							>▶</button>
+						{/if}
+						<button
+							class="hero-close-icon"
+							onclick={closeTaskView}
+							aria-label={heroFocusTask ? "Close task and stop focus" : "Close task"}
+							title={heroFocusTask ? "Close task and stop focus" : "Close task"}
+						>✕</button>
+					</div>
 
 				{#if focusedTodo.detail}
 					<p class="focus-detail">{focusedTodo.detail}</p>
@@ -705,84 +750,13 @@
 				{/if}
 
 				<div class="focus-bottom">
-					<div class="focus-session" class:paused={expandedFocusedTask.sessionStatus === "paused"}>
-						<span class="focus-session-label">{expandedFocusedTask.sessionStatus === "paused" ? 'PAUSED' : 'SESSION'}</span>
+					<div class="focus-session" class:paused={heroFocusTask?.sessionStatus === "paused"}>
+						<span class="focus-session-label">{heroFocusTask ? (heroFocusTask.sessionStatus === "paused" ? 'PAUSED' : 'SESSION') : 'READY'}</span>
 						<span class="focus-elapsed"
-							>{formatElapsed(sessionElapsed)}</span
+							>{heroFocusTask ? formatElapsed(sessionElapsed) : '00:00'}</span
 						>
 					</div>
-
-					<div class="focus-pomodoro">
-						{#if expandedFocusedTask.pomodoro}
-							<div class="pomo-pill" class:expired={pomoExpired}>
-								{#if pomoExpired}
-									<span class="pomo-label">TIME'S UP</span>
-									{#if expandedFocusedTask.pomodoro.type === "work"}
-										<button
-											class="pomo-action"
-											onclick={() => pomoAdvance(expandedFocusedTask.taskId)}
-											>BREAK</button
-										>
-									{:else}
-										<button
-											class="pomo-action"
-											onclick={() => pomoAdvance(expandedFocusedTask.taskId)}>WORK</button
-										>
-									{/if}
-								{:else}
-									<span class="pomo-time"
-										>{formatTime(pomoRemaining)}</span
-									>
-									<span class="pomo-type">{pomoLabel}</span>
-									{#if expandedFocusedTask.pomodoro.paused}
-										<button
-											class="pomo-action"
-											onclick={() => pomoResume(expandedFocusedTask.taskId)}>GO</button
-										>
-									{:else}
-										<button
-											class="pomo-action"
-											onclick={() => pomoPause(expandedFocusedTask.taskId)}>PAUSE</button
-										>
-									{/if}
-									<button
-										class="pomo-action"
-										onclick={() => pomoReset(expandedFocusedTask.taskId)}>RESET</button
-									>
-								{/if}
-								<button
-									class="pomo-action pomo-stop"
-									onclick={() => pomoStop(expandedFocusedTask.taskId)}>STOP</button
-								>
-								<button
-									class="pomo-dismiss"
-									onclick={() => pomoDismiss(expandedFocusedTask.taskId)}
-									aria-label="Dismiss pomodoro"
-									title="Dismiss pomodoro">✕</button
-								>
-								<div class="pomo-dots">
-									{#each Array(4) as _, i}
-										<span
-											class="pomo-dot"
-											class:filled={i < cyclesFilled}
-										></span>
-									{/each}
-								</div>
-							</div>
-						{:else}
-							<button
-								class="pomo-start-btn"
-								onclick={() => startPomodoro(expandedFocusedTask.taskId)}>START POMODORO</button
-							>
-						{/if}
-					</div>
 				</div>
-
-				<button
-					type="button"
-					class="focus-view-logs"
-					onclick={(event) => openDetail(focusedTodo.id, event.currentTarget)}
-				>OPEN TASK SHEET &rsaquo;</button>
 
 				<form
 					class="focus-log-form"
@@ -881,11 +855,11 @@
 									</div>
 									<div class="focus-stat">
 										<span class="focus-stat-label">Last end</span>
-										<strong>{focusedLastSession ? formatSessionDate(focusedLastSession.startedAt) : "None"}</strong>
+										<strong>{focusedLastSession?.endedAt ? formatSessionDate(focusedLastSession.endedAt) : "None"}</strong>
 									</div>
 									<div class="focus-stat">
-										<span class="focus-stat-label">Pomodoros</span>
-										<strong>{focusedPomodoros.length}</strong>
+										<span class="focus-stat-label">Avg session</span>
+										<strong>{averageSessionDuration(focusedTodo.totalFocusMs ?? 0, focusedSessions)}</strong>
 									</div>
 								</div>
 							</div>
@@ -911,7 +885,7 @@
 								{/if}
 								<div class="focus-inline-meta">
 									<span>{focusedLogCount} log{focusedLogCount !== 1 ? "s" : ""}</span>
-									<span>{focusedPomodoros.length} pomo{focusedPomodoros.length !== 1 ? "s" : ""}</span>
+									<span>{focusedSessions.length} session{focusedSessions.length !== 1 ? "s" : ""}</span>
 								</div>
 							</div>
 						{/if}
@@ -1149,7 +1123,7 @@
 						{#if !collapsedGroups.has(group.name)}
 						<ul class="todo-list">
 							{#each group.todos as todo (todo.id)}
-								{@const taskPomSummary = pomodoroSummary(todo.id)}
+								{@const taskSessionSummary = sessionSummary(todo.id)}
 								{@const lastLog = todo.logs?.length
 									? todo.logs[todo.logs.length - 1]
 									: null}
@@ -1161,9 +1135,10 @@
 									class:done={todo.done}
 									class:active={focusedTaskIdSet.has(todo.id)}
 									tabindex="-1"
-									onclick={(e: MouseEvent) => {
+									onclick={async (e: MouseEvent) => {
 										if ((e.target as HTMLElement)?.closest?.('button, a, select, form')) return;
-										openDetail(todo.id, e.currentTarget);
+										if (todo.done) return;
+										await openTaskInFocusView(todo.id);
 									}}
 								>
 									<div class="todo-row">
@@ -1171,7 +1146,7 @@
 											method="POST"
 											action="?/toggle"
 											class="toggle-form"
-											use:enhance
+											use:enhance={enhanceToggle}
 										>
 											<input
 												type="hidden"
@@ -1182,6 +1157,8 @@
 												type="submit"
 												class="toggle-btn"
 												class:checked={todo.done}
+												disabled={Boolean(pendingToggleById[todo.id])}
+												aria-busy={Boolean(pendingToggleById[todo.id])}
 											>
 												{todo.done ? "✓" : ""}
 											</button>
@@ -1199,19 +1176,11 @@
 
 										<button
 											class="todo-title"
-											onclick={async (event) => {
-												if (!todo.done) {
-													if (focusedTaskIdSet.has(todo.id)) {
-														scrollFocusedHeroIntoView();
-														await expandTask(todo.id);
-													} else {
-														closeDetail();
-														await focusOnTask(todo.id);
-													}
-													return;
-												}
-												openDetail(todo.id, event.currentTarget);
-											}}>{todo.title}</button
+											onclick={async () => {
+												if (todo.done) return;
+												await openTaskInFocusView(todo.id);
+											}}
+										>{todo.title}</button
 										>
 
 										{#if todo.deadline}
@@ -1234,7 +1203,7 @@
 											{/if}
 											{#if !todo.done && focusedTaskIdSet.has(todo.id)}
 												<button onclick={() => toggleTaskRunState(todo.id)}
-													>{getFocusedTask(visibleFocus, todo.id)?.sessionStatus === "running" ? "PAUSE" : "PLAY"}</button
+													>{taskRunActionLabel(getFocusedTask(visibleFocus, todo.id)?.sessionStatus)}</button
 												>
 											{/if}
 											{#if todo.done}
@@ -1271,16 +1240,16 @@
 										</div>
 									</div>
 
-									{#if taskPomSummary || lastLog || totalFocus > 0}
+									{#if taskSessionSummary || lastLog || totalFocus > 0}
 										<div class="task-meta">
 											{#if totalFocus > 0}
 												<span class="task-meta-item"
 													>{formatDuration(totalFocus)} focused</span
 												>
 											{/if}
-											{#if taskPomSummary}
+											{#if taskSessionSummary}
 												<span class="task-meta-item"
-													>{taskPomSummary}</span
+													>{taskSessionSummary}</span
 												>
 											{/if}
 											{#if lastLog}
@@ -1307,204 +1276,4 @@
 		</section>
 	</main>
 
-	{#if detailTodo}
-		{@const detailPomodoros = getTaskPomodoros(detailTodo.id)}
-		{@const detailSessions = getTaskSessions(detailTodo.id)}
-		{@const detailHasDetail = Boolean(detailTodo.detail)}
-		{@const detailHasSessions = detailSessions.length > 0 || (detailTodo.totalFocusMs ?? 0) > 0}
-		{@const detailHasPomodoros = detailPomodoros.length > 0}
-		{@const detailHasLogs = (detailTodo.logs?.length ?? 0) > 0}
-		{@const detailHasContent = detailHasDetail || detailHasSessions || detailHasPomodoros || detailHasLogs}
-		{@const detailSectionCount = Number(detailHasDetail) + Number(detailHasSessions) + Number(detailHasPomodoros) + Number(detailHasLogs)}
-		{@const detailSparseState = detailHasContent && detailSectionCount <= 2}
-		<div class="detail-overlay visible" aria-hidden="true" onclick={() => closeDetail({ restoreFocus: false })}></div>
-		<div
-			class="detail-panel"
-			class:open={detailOpen}
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="detail-title"
-		>
-			<div class="detail-header">
-				<div class="detail-header-info">
-					<div class="detail-title" id="detail-title">{detailTodo.title}</div>
-					<div class="detail-badges">
-						{#if detailTodo.done}
-							<span class="detail-badge done">DONE</span>
-						{:else if focusedTaskIdSet.has(detailTodo.id)}
-							<span class="detail-badge active">FOCUSED</span>
-						{/if}
-						{#if detailTodo.deadline && !detailTodo.done && isOverdue(detailTodo.deadline)}
-							<span class="detail-badge overdue">OVERDUE</span>
-						{/if}
-					</div>
-				</div>
-				<button bind:this={detailCloseButton} class="detail-close" onclick={() => closeDetail()}>✕</button>
-			</div>
-
-			{#if !detailHasContent}
-				<div class="detail-empty">
-					<div class="detail-empty-illustration" aria-hidden="true">
-						<svg viewBox="0 0 220 220" class="coffee-cup-art">
-							<defs>
-								<linearGradient id="coffeeGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-									<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.9" />
-									<stop offset="100%" stop-color="var(--accent-dark)" stop-opacity="0.45" />
-								</linearGradient>
-							</defs>
-							<path class="coffee-steam coffee-steam--1" d="M86 72c-8-15 8-18 0-34" />
-							<path class="coffee-steam coffee-steam--2" d="M110 64c-10-18 10-22 0-40" />
-							<path class="coffee-steam coffee-steam--3" d="M136 72c-7-14 7-19 0-33" />
-							<ellipse class="coffee-shadow" cx="110" cy="176" rx="54" ry="12" />
-							<path class="coffee-saucer" d="M52 166h116" />
-							<path class="coffee-cup" d="M66 98h88v44c0 17-13 30-30 30H96c-17 0-30-13-30-30z" />
-							<path class="coffee-fill" d="M74 102h72v26H74z" />
-							<path class="coffee-rim" d="M70 98h80" />
-							<path class="coffee-handle" d="M154 112h10c12 0 20 9 20 20s-8 20-20 20h-10" />
-						</svg>
-					</div>
-					<div class="detail-empty-copy">
-						<div class="detail-section-title">Task sheet warming up</div>
-						<p>No notes, sessions, pomodoros, or logs yet. Let this one simmer and come back once the work starts leaving a trail.</p>
-					</div>
-				</div>
-			{/if}
-
-			{#if detailHasDetail}
-				<div class="detail-section">
-					<div class="detail-section-title">DETAILS</div>
-					<p class="detail-text-readonly">{detailTodo.detail}</p>
-				</div>
-			{/if}
-
-			{#if detailHasSessions}
-				<div class="detail-section">
-					<div class="detail-section-title">SESSIONS</div>
-					<div class="session-summary">
-						<strong
-							>{formatDuration(
-								detailTodo.totalFocusMs ?? 0,
-							)}</strong
-						>
-						across {detailSessions.length} session{detailSessions.length !==
-						1
-							? "s"
-							: ""}
-					</div>
-					{#if detailSessions.length > 0}
-						<div class="session-list">
-							{#each detailSessions
-								.slice(-5)
-								.reverse() as session (session.id)}
-								<div class="session-entry">
-									<span class="session-date"
-										>{formatSessionDate(
-											session.startedAt,
-										)}</span
-									>
-									<span class="session-duration"
-										>{formatDuration(
-											sessionDuration(session),
-										)}</span
-									>
-									<span class="session-reason"
-										>{sessionLabels[session.endReason ?? ''] ?? session.endReason ?? ""}</span
-									>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
-
-			{#if detailHasPomodoros}
-				<div class="detail-section">
-					<div class="detail-section-title">POMODOROS</div>
-					<div class="time-summary">
-						<strong
-							>{detailPomodoros.length} session{detailPomodoros.length !==
-							1
-								? "s"
-								: ""}</strong
-						>
-						· {formatDuration(
-							detailPomodoros.reduce((s, l) => s + l.duration, 0),
-						)} total
-					</div>
-				</div>
-			{/if}
-
-			{#if detailHasLogs}
-				<div class="detail-section">
-					<div class="detail-section-title">ACTIVITY LOG</div>
-					<div class="log-list">
-						{#each [...(detailTodo.logs ?? [])].reverse() as log (log.id)}
-							<div class="log-entry">
-								<div class="log-entry-header">
-									<span class="log-time"
-										>{relativeTime(log.createdAt)}</span
-									>
-									<form
-										method="POST"
-										action="?/deleteLog"
-										use:enhance
-									>
-										<input
-											type="hidden"
-											name="id"
-											value={detailTodo.id}
-										/>
-										<input
-											type="hidden"
-											name="logId"
-											value={log.id}
-										/>
-										<button type="submit" class="log-delete"
-											>✕</button
-										>
-									</form>
-								</div>
-								<div class="log-text">
-									{@html renderMarkdown(log.text)}
-								</div>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			{#if detailSparseState}
-				<div class="detail-sparse-state">
-					<div class="detail-empty-illustration detail-empty-illustration--sparse" aria-hidden="true">
-						<svg viewBox="0 0 320 220" class="task-sheet-art">
-							<defs>
-								<linearGradient id="taskSheetGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-									<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.9" />
-									<stop offset="100%" stop-color="var(--accent-dark)" stop-opacity="0.25" />
-								</linearGradient>
-							</defs>
-							<ellipse class="task-sheet-shadow" cx="168" cy="184" rx="98" ry="18" />
-							<path class="task-sheet-gear-outer" d="M92 108l-10-6 6-10-7-12 9-8-2-12 12-2 3-12 12 2 8-10 10 6 10-6 8 10 12-2 3 12 12 2-2 12 9 8-7 12 6 10-10 6v12l-12 3-3 12-12-2-8 10-10-6-10 6-8-10-12 2-3-12-12-3z" />
-							<circle class="task-sheet-gear-inner" cx="114" cy="96" r="25" />
-							<circle class="task-sheet-gear-core" cx="114" cy="96" r="8" />
-							<g class="task-sheet-page">
-								<path class="task-sheet-panel" d="M146 44h94l32 30v100H146z" />
-								<path class="task-sheet-fold" d="M240 44v30h32" />
-								<rect class="task-sheet-tab" x="166" y="64" width="62" height="14" rx="3" />
-								<path class="task-sheet-line" d="M166 98h86" />
-								<path class="task-sheet-line" d="M166 120h86" />
-								<path class="task-sheet-line" d="M166 142h64" />
-								<path class="task-sheet-line task-sheet-line--accent" d="M166 164h50" />
-							</g>
-							<path class="task-sheet-link" d="M138 112c14 0 18 12 28 12" />
-						</svg>
-					</div>
-					<div class="detail-empty-copy">
-						<div class="detail-section-title">Task sheet in motion</div>
-						<p>Some signals are already coming through. Keep adding notes, logs, or pomodoros and this sheet will fill out instead of idling on one section.</p>
-					</div>
-				</div>
-			{/if}
-		</div>
-	{/if}
 </div>

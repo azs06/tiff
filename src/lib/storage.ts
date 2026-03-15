@@ -1,20 +1,13 @@
 import * as d1Store from './d1';
 import {
-	advanceTaskPomodoro,
-	dismissTaskPomodoro,
 	ensureOpenSession,
 	expandFocusedTask,
 	getFocusedTask,
 	normalizeFocusState,
 	pauseFocusedTask,
-	pauseTaskPomodoro,
 	removeFocusedTask,
-	resetTaskPomodoro,
 	resumeFocusedTask,
-	resumeTaskPomodoro,
-	startTaskPomodoro,
 	stopFocusedTask,
-	stopTaskPomodoro,
 	upsertFocusedTask
 } from './focus';
 import * as kvStore from './kv';
@@ -22,10 +15,8 @@ import type {
 	FocusSession,
 	FocusState,
 	GitHubRepoInfo,
-	PomodoroLog,
 	Project,
 	ProjectAttachment,
-	TimerState,
 	Todo,
 	UserSettings
 } from './types';
@@ -85,12 +76,6 @@ type UnifiedStore<TStore extends KVNamespace | D1Database> = {
 	saveSessions: (store: TStore, email: string, sessions: FocusSession[]) => Promise<void>;
 	getTodos: (store: TStore, email: string) => Promise<Todo[]>;
 	saveTodos: (store: TStore, email: string, todos: Todo[]) => Promise<void>;
-	logPomodoro: (
-		store: TStore,
-		email: string,
-		entry: Omit<PomodoroLog, 'completedAt'>
-	) => Promise<void>;
-	getSettings: (store: TStore, email: string) => Promise<UserSettings>;
 };
 
 function cloneTodos(todos: Todo[]): Todo[] {
@@ -152,13 +137,11 @@ async function mutateFocusState(
 		focus: FocusState | null;
 		sessions: FocusSession[];
 		todos: Todo[];
-		settings: UserSettings;
 		now: number;
 	}) => {
 		focus: FocusState | null;
 		sessions: FocusSession[];
 		todos: Todo[];
-		logEntry?: Omit<PomodoroLog, 'completedAt'> | null;
 	}
 ): Promise<void> {
 	const kvAdapter: UnifiedStore<KVNamespace> = {
@@ -167,9 +150,7 @@ async function mutateFocusState(
 		getSessions: kvStore.getSessions,
 		saveSessions: kvStore.saveSessions,
 		getTodos: kvStore.getTodos,
-		saveTodos: kvStore.saveTodos,
-		logPomodoro: kvStore.logPomodoro,
-		getSettings: kvStore.getSettings
+		saveTodos: kvStore.saveTodos
 	};
 	const d1Adapter: UnifiedStore<D1Database> = {
 		getFocus: d1Store.getFocus,
@@ -177,9 +158,7 @@ async function mutateFocusState(
 		getSessions: d1Store.getSessions,
 		saveSessions: d1Store.saveSessions,
 		getTodos: d1Store.getTodos,
-		saveTodos: d1Store.saveTodos,
-		logPomodoro: d1Store.logPomodoro,
-		getSettings: d1Store.getSettings
+		saveTodos: d1Store.saveTodos
 	};
 
 	await write(
@@ -202,35 +181,30 @@ async function mutateFocusStateInStore<TStore extends KVNamespace | D1Database>(
 		focus: FocusState | null;
 		sessions: FocusSession[];
 		todos: Todo[];
-		settings: UserSettings;
 		now: number;
 	}) => {
 		focus: FocusState | null;
 		sessions: FocusSession[];
 		todos: Todo[];
-		logEntry?: Omit<PomodoroLog, 'completedAt'> | null;
 	}
 ) {
-	const [focus, sessions, todos, settings] = await Promise.all([
+	const [focus, sessions, todos] = await Promise.all([
 		store.getFocus(backend, email),
 		store.getSessions(backend, email),
-		store.getTodos(backend, email),
-		store.getSettings(backend, email)
+		store.getTodos(backend, email)
 	]);
 
 	const result = mutate({
 		focus: normalizeFocusState(focus),
 		sessions: cloneSessions(sessions),
 		todos: cloneTodos(todos),
-		settings,
 		now: Date.now()
 	});
 
 	await Promise.all([
 		store.saveFocus(backend, email, normalizeFocusState(result.focus)),
 		store.saveSessions(backend, email, result.sessions),
-		store.saveTodos(backend, email, result.todos),
-		result.logEntry ? store.logPomodoro(backend, email, result.logEntry) : Promise.resolve()
+		store.saveTodos(backend, email, result.todos)
 	]);
 }
 
@@ -282,42 +256,22 @@ export async function deleteTodo(env: App.Platform['env'] | undefined, email: st
 	await write(env, 'deleteTodo', (kv) => kvStore.deleteTodo(kv, email, id), (db) => d1Store.deleteTodo(db, email, id));
 }
 
-export async function getTimer(env: App.Platform['env'] | undefined, email: string): Promise<TimerState | null> {
+export async function getLegacyTimer(
+	env: App.Platform['env'] | undefined,
+	email: string
+): Promise<{ activeTaskId: string; startedAt: number } | null> {
 	const kv = getKV(env);
-	if (kv) return kvStore.getTimer(kv, email);
-
-	const d1 = getD1(env);
-	if (d1) return d1Store.getTimer(d1, email);
+	if (kv) return kvStore.getLegacyTimer(kv, email);
 
 	return null;
 }
 
-export async function saveTimer(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	timer: TimerState | null
-): Promise<void> {
+export async function clearLegacyTimer(env: App.Platform['env'] | undefined, email: string): Promise<void> {
 	const kv = getKV(env);
 	if (kv) {
-		await kvStore.saveTimer(kv, email, timer);
+		await kvStore.clearLegacyTimer(kv, email);
 		return;
 	}
-
-	const d1 = getD1(env);
-	if (d1) await d1Store.saveTimer(d1, email, timer);
-}
-
-export async function logPomodoro(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	entry: Omit<PomodoroLog, 'completedAt'>
-): Promise<void> {
-	await write(
-		env,
-		'logPomodoro',
-		(kv) => kvStore.logPomodoro(kv, email, entry),
-		(db) => d1Store.logPomodoro(db, email, entry)
-	);
 }
 
 export async function getSettings(env: App.Platform['env'] | undefined, email: string): Promise<UserSettings> {
@@ -347,15 +301,6 @@ export async function unarchiveTodo(env: App.Platform['env'] | undefined, email:
 		'unarchiveTodo',
 		(kv) => kvStore.unarchiveTodo(kv, email, id),
 		(db) => d1Store.unarchiveTodo(db, email, id)
-	);
-}
-
-export async function getPomodoroLogs(env: App.Platform['env'] | undefined, email: string): Promise<PomodoroLog[]> {
-	return read(
-		env,
-		'getPomodoroLogs',
-		(kv) => kvStore.getPomodoroLogs(kv, email),
-		(db) => d1Store.getPomodoroLogs(db, email)
 	);
 }
 
@@ -572,7 +517,7 @@ export async function deleteGitHubInfo(
 }
 
 export async function focusTaskTx(env: App.Platform['env'] | undefined, email: string, taskId: string): Promise<void> {
-	await mutateFocusState(env, email, 'focusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'focusTaskTx', ({ focus, sessions, todos, now }) => {
 		const existing = getFocusedTask(focus, taskId);
 		const nextFocus = upsertFocusedTask(focus, taskId, now);
 		const nextTask = getFocusedTask(nextFocus, taskId);
@@ -589,7 +534,7 @@ export async function expandFocusTaskTx(
 	email: string,
 	taskId: string
 ): Promise<void> {
-	await mutateFocusState(env, email, 'expandFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
+	await mutateFocusState(env, email, 'expandFocusTaskTx', ({ focus, sessions, todos, now }) => ({
 		focus: expandFocusedTask(focus, taskId, now),
 		sessions,
 		todos
@@ -601,7 +546,7 @@ export async function pauseFocusTaskTx(
 	email: string,
 	taskId: string
 ): Promise<void> {
-	await mutateFocusState(env, email, 'pauseFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'pauseFocusTaskTx', ({ focus, sessions, todos, now }) => {
 		const task = getFocusedTask(focus, taskId);
 		if (task?.sessionStatus === 'running') {
 			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, 'pause', now);
@@ -614,12 +559,31 @@ export async function pauseFocusTaskTx(
 	});
 }
 
+export async function pauseAllFocusTx(
+	env: App.Platform['env'] | undefined,
+	email: string
+): Promise<void> {
+	await mutateFocusState(env, email, 'pauseAllFocusTx', ({ focus, sessions, todos, now }) => {
+		let nextFocus = focus;
+		for (const task of focus?.tasks ?? []) {
+			if (task.sessionStatus !== 'running') continue;
+			closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, 'pause', now);
+			nextFocus = pauseFocusedTask(nextFocus, task.taskId, now);
+		}
+		return {
+			focus: nextFocus,
+			sessions,
+			todos
+		};
+	});
+}
+
 export async function resumeFocusTaskTx(
 	env: App.Platform['env'] | undefined,
 	email: string,
 	taskId: string
 ): Promise<void> {
-	await mutateFocusState(env, email, 'resumeFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'resumeFocusTaskTx', ({ focus, sessions, todos, now }) => {
 		const nextFocus = resumeFocusedTask(focus, taskId, now);
 		const resumed = getFocusedTask(nextFocus, taskId);
 		if (resumed?.sessionStatus === 'running' && resumed.sessionStartedAt) {
@@ -635,7 +599,7 @@ export async function stopFocusTaskTx(
 	taskId: string,
 	reason: FocusSession['endReason'] = 'manual'
 ): Promise<void> {
-	await mutateFocusState(env, email, 'stopFocusTaskTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'stopFocusTaskTx', ({ focus, sessions, todos, now }) => {
 		const task = getFocusedTask(focus, taskId);
 		if (task?.sessionStatus === 'running') {
 			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, reason, now);
@@ -653,7 +617,7 @@ export async function unfocusTx(
 	email: string,
 	reason: FocusSession['endReason']
 ): Promise<void> {
-	await mutateFocusState(env, email, 'unfocusTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'unfocusTx', ({ focus, sessions, todos, now }) => {
 		for (const task of focus?.tasks ?? []) {
 			if (task.sessionStatus === 'running') {
 				closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, reason, now);
@@ -663,100 +627,12 @@ export async function unfocusTx(
 	});
 }
 
-export async function startTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'startTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => ({
-		focus: startTaskPomodoro(focus, taskId, settings, now),
-		sessions,
-		todos
-	}));
-}
-
-export async function pauseTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'pauseTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
-		focus: pauseTaskPomodoro(focus, taskId, now),
-		sessions,
-		todos
-	}));
-}
-
-export async function resumeTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'resumeTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings, now }) => ({
-		focus: resumeTaskPomodoro(focus, taskId, now),
-		sessions,
-		todos
-	}));
-}
-
-export async function resetTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'resetTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => ({
-		focus: resetTaskPomodoro(focus, taskId, settings, now),
-		sessions,
-		todos
-	}));
-}
-
-export async function advanceTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'advanceTaskPomodoroTx', ({ focus, sessions, todos, settings, now }) => {
-		const { focus: nextFocus, logEntry } = advanceTaskPomodoro(focus, taskId, settings, now);
-		return {
-			focus: nextFocus,
-			sessions,
-			todos,
-			logEntry
-		};
-	});
-}
-
-export async function stopTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'stopTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings }) => ({
-		focus: stopTaskPomodoro(focus, taskId),
-		sessions,
-		todos
-	}));
-}
-
-export async function dismissTaskPomodoroTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'dismissTaskPomodoroTx', ({ focus, sessions, todos, settings: _settings }) => ({
-		focus: dismissTaskPomodoro(focus, taskId),
-		sessions,
-		todos
-	}));
-}
-
 export async function toggleTodoAndHandleFocusTx(
 	env: App.Platform['env'] | undefined,
 	email: string,
 	id: string
 ): Promise<void> {
-	await mutateFocusState(env, email, 'toggleTodoAndHandleFocusTx', ({ focus, sessions, todos, settings: _settings, now }) => {
+	await mutateFocusState(env, email, 'toggleTodoAndHandleFocusTx', ({ focus, sessions, todos, now }) => {
 		const todo = todos.find((task) => task.id === id);
 		if (!todo) return { focus, sessions, todos };
 

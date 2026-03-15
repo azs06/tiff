@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -10,13 +11,44 @@
 	let editDetail = $state('');
 	let editDeadlineChoice = $state<'none' | 'today' | 'tomorrow' | 'custom'>('none');
 	let editCustomDeadline = $state('');
+	let optimisticDoneById = $state<Record<string, boolean>>({});
+	let pendingToggleById = $state<Record<string, boolean>>({});
 
 	$effect(() => {
 		timezoneOffset = new Date().getTimezoneOffset();
 	});
 
+	function withoutToggleKey(source: Record<string, boolean>, id: string) {
+		const next = { ...source };
+		delete next[id];
+		return next;
+	}
+
+	function setOptimisticDone(id: string, done: boolean | null) {
+		if (done === null) {
+			optimisticDoneById = withoutToggleKey(optimisticDoneById, id);
+			return;
+		}
+		optimisticDoneById = { ...optimisticDoneById, [id]: done };
+	}
+
+	function setPendingToggle(id: string, pending: boolean) {
+		if (!pending) {
+			pendingToggleById = withoutToggleKey(pendingToggleById, id);
+			return;
+		}
+		pendingToggleById = { ...pendingToggleById, [id]: true };
+	}
+
+	let effectiveTodos = $derived(
+		data.todos.map((todo) => {
+			const optimisticDone = optimisticDoneById[todo.id];
+			return optimisticDone === undefined ? todo : { ...todo, done: optimisticDone };
+		})
+	);
+
 	let inboxTodos = $derived(() =>
-		data.todos
+		effectiveTodos
 			.filter((todo) => !todo.projectId)
 			.slice()
 			.sort((a, b) => Number(a.done) - Number(b.done) || b.createdAt - a.createdAt)
@@ -64,6 +96,39 @@
 		editingTaskId = null;
 	}
 
+	const enhanceToggle: SubmitFunction = ({ formData, cancel }) => {
+		const id = formData.get('id')?.toString();
+		if (!id) return;
+
+		const todo = effectiveTodos.find((item) => item.id === id);
+		if (!todo) {
+			cancel();
+			return;
+		}
+
+		if (pendingToggleById[id]) {
+			cancel();
+			return;
+		}
+
+		setOptimisticDone(id, !todo.done);
+		setPendingToggle(id, true);
+
+		return async ({ result, update }) => {
+			try {
+				if (result.type === 'success') {
+					await update({ reset: false });
+					return;
+				}
+
+				await applyAction(result);
+			} finally {
+				setOptimisticDone(id, null);
+				setPendingToggle(id, false);
+			}
+		};
+	};
+
 	$effect(() => {
 		if (editingTaskId && !inboxTodos().some((todo) => todo.id === editingTaskId)) {
 			editingTaskId = null;
@@ -83,9 +148,15 @@
 					<article class="inbox-task-item" class:done={todo.done}>
 						<div class="inbox-task-header">
 							<div class="inbox-task-main">
-								<form method="POST" action="?/toggle" class="toggle-form" use:enhance>
+								<form method="POST" action="?/toggle" class="toggle-form" use:enhance={enhanceToggle}>
 									<input type="hidden" name="id" value={todo.id} />
-									<button type="submit" class="toggle-btn" class:checked={todo.done}>
+									<button
+										type="submit"
+										class="toggle-btn"
+										class:checked={todo.done}
+										disabled={Boolean(pendingToggleById[todo.id])}
+										aria-busy={Boolean(pendingToggleById[todo.id])}
+									>
 										{todo.done ? '✓' : ''}
 									</button>
 								</form>
