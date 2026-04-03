@@ -3056,7 +3056,6 @@ button:active:not(.todo-title) {
 
 .theme-switcher {
 	display: flex;
-	border-bottom: 1px solid var(--border-color);
 	padding: 0.75rem 1.5rem;
 	gap: 0.4rem;
 }
