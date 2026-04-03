@@ -659,7 +659,14 @@
 							aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
 							title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
 						>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
-						{#if !heroFocusTask}
+						{#if heroFocusTask}
+							<button
+								class="hero-pause-icon"
+								onclick={() => stopTask(heroFocusTask.taskId)}
+								aria-label="Stop focus session"
+								title="Stop focus session"
+							>■</button>
+						{:else}
 							<button
 								class="hero-pause-icon"
 								onclick={() => focusOnTask(focusedTodo.id)}
