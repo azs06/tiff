@@ -11,7 +11,7 @@ import type {
 	Todo,
 	UserSettings
 } from './types';
-import { DEFAULT_SETTINGS } from './types';
+import { DEFAULT_SETTINGS, THEMES } from './types';
 import { normalizeFocusState } from './focus';
 import { parseGitHubRepo } from './github';
 
@@ -310,12 +310,14 @@ export async function getSettings(db: D1Database, email: string): Promise<UserSe
 	const row = await db
 		.prepare('SELECT theme FROM user_settings WHERE user_email = ?')
 		.bind(email)
-		.first<{ theme: string }>();
+		.first<{ theme: string | null }>();
 
 	if (!row) return DEFAULT_SETTINGS;
 
+	const theme = row.theme;
+
 	return {
-		theme: row.theme as UserSettings['theme']
+		theme: theme && THEMES.includes(theme as UserSettings['theme']) ? (theme as UserSettings['theme']) : DEFAULT_SETTINGS.theme
 	};
 }
 
