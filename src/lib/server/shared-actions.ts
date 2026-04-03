@@ -26,9 +26,6 @@ import {
 	unarchiveProject,
 	expandFocusTaskTx,
 	focusTaskTx,
-	pauseAllFocusTx,
-	pauseFocusTaskTx,
-	resumeFocusTaskTx,
 	stopFocusTaskTx,
 	toggleTodoAndHandleFocusTx,
 	deleteProjectCascadeTx
@@ -205,27 +202,6 @@ export const sharedActions: Actions = {
 		const taskId = data.get('taskId')?.toString();
 		if (!taskId) return fail(400);
 		await expandFocusTaskTx(env, locals.userEmail, taskId);
-	},
-
-	pauseFocusTask: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await pauseFocusTaskTx(env, locals.userEmail, taskId);
-	},
-
-	pauseAllFocus: async ({ locals, platform }) => {
-		const env = platform?.env;
-		await pauseAllFocusTx(env, locals.userEmail);
-	},
-
-	resumeFocusTask: async ({ request, locals, platform }) => {
-		const env = platform?.env;
-		const data = await request.formData();
-		const taskId = data.get('taskId')?.toString();
-		if (!taskId) return fail(400);
-		await resumeFocusTaskTx(env, locals.userEmail, taskId);
 	},
 
 	stopFocusTask: async ({ request, locals, platform }) => {

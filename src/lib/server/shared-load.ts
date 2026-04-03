@@ -81,7 +81,7 @@ export async function loadAppData(locals: App.Locals, platform: App.Platform | u
 	}
 
 	for (const task of focus?.tasks ?? []) {
-		if (task.sessionStatus === 'running' && task.sessionStartedAt) {
+		if (task.sessionStartedAt) {
 			const nextSessions = ensureOpenSession(sessions, task.taskId, task.sessionStartedAt);
 			if (nextSessions !== sessions) {
 				sessions = nextSessions;

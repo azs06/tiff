@@ -5,13 +5,16 @@
 	import { tick } from "svelte";
 	import type { SubmitFunction } from "@sveltejs/kit";
 	import type { PageData } from "./$types";
-	import type { FocusSession } from "$lib/types";
+	import type { FocusSession, FocusState } from "$lib/types";
 	import {
+		expandFocusedTask,
 		focusTaskIds,
 		getExpandedFocusedTask,
 		getFocusedTask,
 		getSessionElapsed,
 		normalizeFocusState,
+		stopFocusedTask,
+		upsertFocusedTask,
 	} from "$lib/focus";
 
 	let { data }: { data: PageData } = $props();
@@ -125,7 +128,9 @@
 		return () => clearInterval(id);
 	});
 
-	let focus = $derived(normalizeFocusState(data.serverFocus));
+	let serverFocus = $derived(normalizeFocusState(data.serverFocus));
+	let optimisticFocus = $state<FocusState | null | undefined>(undefined);
+	let focus = $derived(optimisticFocus === undefined ? serverFocus : optimisticFocus);
 	let effectiveTodos = $derived(
 		data.todos.map((todo) => {
 			const optimisticDone = optimisticDoneById[todo.id];
@@ -190,10 +195,6 @@
 			? effectiveTodoMap.get(heroTaskId) ?? null
 			: null,
 	);
-	let hasRunningFocus = $derived(
-		(visibleFocus?.tasks ?? []).some((task) => task.sessionStatus === "running"),
-	);
-	let teardownPauseSent = $state(false);
 
 	function formatElapsed(ms: number): string {
 		const totalSeconds = Math.floor(ms / 1000);
@@ -250,42 +251,34 @@
 		pushState(nextUrl, nextState);
 	}
 
-	async function postAction(action: string, values: Record<string, string>) {
+	async function postAction(
+		action: string,
+		values: Record<string, string>,
+		options?: {
+			optimisticFocus?: (focus: FocusState | null, now: number) => FocusState | null;
+		},
+	) {
+		if (options?.optimisticFocus) {
+			optimisticFocus = options.optimisticFocus(focus, Date.now());
+		}
 		const formData = new FormData();
 		for (const [key, value] of Object.entries(values)) {
 			formData.set(key, value);
 		}
-		const response = await fetch(`?/${action}`, {
-			method: "POST",
-			body: formData,
-			headers: {
-				"x-sveltekit-action": "true",
-			},
-		});
-		if (!response.ok) {
-			throw new Error(`Focus action failed: ${action}`);
-		}
-		await invalidateAll();
-	}
-
-	function sendPauseAllFocusOnTeardown() {
-		if (teardownPauseSent || !hasRunningFocus) return;
-		teardownPauseSent = true;
-
 		try {
-			if (navigator.sendBeacon?.("?/pauseAllFocus", new FormData())) return;
-		} catch {
-			// Fall through to keepalive fetch when beacon fails.
-		}
-
-		try {
-			void fetch("?/pauseAllFocus", {
+			const response = await fetch(`?/${action}`, {
 				method: "POST",
-				body: new FormData(),
-				keepalive: true,
+				body: formData,
+				headers: {
+					"x-sveltekit-action": "true",
+				},
 			});
-		} catch {
-			// Ignore teardown delivery failures; unload persistence is best-effort.
+			if (!response.ok) {
+				throw new Error(`Focus action failed: ${action}`);
+			}
+			await invalidateAll();
+		} finally {
+			optimisticFocus = undefined;
 		}
 	}
 
@@ -323,14 +316,18 @@
 	};
 
 	async function focusOnTask(taskId: string) {
-		await postAction("focusTask", { taskId });
+		await postAction("focusTask", { taskId }, {
+			optimisticFocus: (currentFocus, now) => upsertFocusedTask(currentFocus, taskId, now),
+		});
 		await tick();
 		scrollFocusedHeroIntoView();
 	}
 
 	async function expandTask(taskId: string) {
 		syncTaskUrl(taskId);
-		await postAction("expandFocusTask", { taskId });
+		await postAction("expandFocusTask", { taskId }, {
+			optimisticFocus: (currentFocus, now) => expandFocusedTask(currentFocus, taskId, now),
+		});
 		await tick();
 		scrollFocusedHeroIntoView();
 	}
@@ -349,23 +346,10 @@
 		scrollFocusedHeroIntoView();
 	}
 
-	async function toggleTaskRunState(taskId: string) {
-		const task = getFocusedTask(visibleFocus, taskId);
-		if (!task) return;
-		await postAction(
-			task.sessionStatus === "running" ? "pauseFocusTask" : "resumeFocusTask",
-			{ taskId },
-		);
-	}
-
-	function taskRunActionLabel(sessionStatus?: string): string {
-		if (sessionStatus === "running") return "PAUSE";
-		if (sessionStatus === "paused") return "RESUME";
-		return "FOCUS";
-	}
-
 	async function stopTask(taskId: string) {
-		await postAction("stopFocusTask", { taskId });
+		await postAction("stopFocusTask", { taskId }, {
+			optimisticFocus: (currentFocus) => stopFocusedTask(currentFocus, taskId),
+		});
 	}
 
 	async function closeTaskView() {
@@ -601,27 +585,6 @@
 		return groups;
 	});
 
-	$effect(() => {
-		if (!hasRunningFocus) {
-			teardownPauseSent = false;
-			return;
-		}
-
-		const onBeforeUnload = () => {
-			sendPauseAllFocusOnTeardown();
-		};
-		const onPageHide = (event: PageTransitionEvent) => {
-			if (event.persisted) return;
-			sendPauseAllFocusOnTeardown();
-		};
-
-		window.addEventListener("beforeunload", onBeforeUnload);
-		window.addEventListener("pagehide", onPageHide);
-		return () => {
-			window.removeEventListener("beforeunload", onBeforeUnload);
-			window.removeEventListener("pagehide", onPageHide);
-		};
-	});
 
 </script>
 
@@ -649,12 +612,6 @@
 								<span class="focus-stack-title">{taskTodo.title}</span>
 							</button>
 							<div class="focus-stack-actions">
-								<button
-									type="button"
-									class="focus-stack-action"
-									onclick={() => toggleTaskRunState(task.taskId)}
-									aria-label={task.sessionStatus === "running" ? "Pause task" : "Resume task"}
-								>{task.sessionStatus === "running" ? "⏸" : "▶"}</button>
 								<button
 									type="button"
 									class="focus-stack-action focus-stack-stop"
@@ -702,17 +659,9 @@
 							aria-label={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
 							title={editingTaskId === focusedTodo.id ? "Close editor" : "Edit task"}
 						>{editingTaskId === focusedTodo.id ? '✕' : '✎'}</button>
-						{#if heroFocusTask}
+						{#if !heroFocusTask}
 							<button
 								class="hero-pause-icon"
-								class:paused={heroFocusTask.sessionStatus === "paused"}
-								onclick={() => toggleTaskRunState(heroFocusTask.taskId)}
-								aria-label={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-								title={heroFocusTask.sessionStatus === "paused" ? "Resume task" : "Pause task"}
-							>{heroFocusTask.sessionStatus === "paused" ? '▶' : '⏸'}</button>
-						{:else}
-							<button
-								class="hero-pause-icon paused"
 								onclick={() => focusOnTask(focusedTodo.id)}
 								aria-label="Start focus session"
 								title="Start focus session"
@@ -750,8 +699,8 @@
 				{/if}
 
 				<div class="focus-bottom">
-					<div class="focus-session" class:paused={heroFocusTask?.sessionStatus === "paused"}>
-						<span class="focus-session-label">{heroFocusTask ? (heroFocusTask.sessionStatus === "paused" ? 'PAUSED' : 'SESSION') : 'READY'}</span>
+					<div class="focus-session">
+						<span class="focus-session-label">{heroFocusTask ? 'SESSION' : 'READY'}</span>
 						<span class="focus-elapsed"
 							>{heroFocusTask ? formatElapsed(sessionElapsed) : '00:00'}</span
 						>
@@ -1202,9 +1151,7 @@
 												>
 											{/if}
 											{#if !todo.done && focusedTaskIdSet.has(todo.id)}
-												<button onclick={() => toggleTaskRunState(todo.id)}
-													>{taskRunActionLabel(getFocusedTask(visibleFocus, todo.id)?.sessionStatus)}</button
-												>
+												<button onclick={() => stopTask(todo.id)}>STOP</button>
 											{/if}
 											{#if todo.done}
 												<form
