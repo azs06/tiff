@@ -4,9 +4,7 @@ import {
 	expandFocusedTask,
 	getFocusedTask,
 	normalizeFocusState,
-	pauseFocusedTask,
 	removeFocusedTask,
-	resumeFocusedTask,
 	stopFocusedTask,
 	upsertFocusedTask
 } from './focus';
@@ -541,58 +539,6 @@ export async function expandFocusTaskTx(
 	}));
 }
 
-export async function pauseFocusTaskTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'pauseFocusTaskTx', ({ focus, sessions, todos, now }) => {
-		const task = getFocusedTask(focus, taskId);
-		if (task?.sessionStatus === 'running') {
-			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, 'pause', now);
-		}
-		return {
-			focus: pauseFocusedTask(focus, taskId, now),
-			sessions,
-			todos
-		};
-	});
-}
-
-export async function pauseAllFocusTx(
-	env: App.Platform['env'] | undefined,
-	email: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'pauseAllFocusTx', ({ focus, sessions, todos, now }) => {
-		let nextFocus = focus;
-		for (const task of focus?.tasks ?? []) {
-			if (task.sessionStatus !== 'running') continue;
-			closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, 'pause', now);
-			nextFocus = pauseFocusedTask(nextFocus, task.taskId, now);
-		}
-		return {
-			focus: nextFocus,
-			sessions,
-			todos
-		};
-	});
-}
-
-export async function resumeFocusTaskTx(
-	env: App.Platform['env'] | undefined,
-	email: string,
-	taskId: string
-): Promise<void> {
-	await mutateFocusState(env, email, 'resumeFocusTaskTx', ({ focus, sessions, todos, now }) => {
-		const nextFocus = resumeFocusedTask(focus, taskId, now);
-		const resumed = getFocusedTask(nextFocus, taskId);
-		if (resumed?.sessionStatus === 'running' && resumed.sessionStartedAt) {
-			sessions = ensureOpenSession(sessions, taskId, resumed.sessionStartedAt);
-		}
-		return { focus: nextFocus, sessions, todos };
-	});
-}
-
 export async function stopFocusTaskTx(
 	env: App.Platform['env'] | undefined,
 	email: string,
@@ -601,7 +547,7 @@ export async function stopFocusTaskTx(
 ): Promise<void> {
 	await mutateFocusState(env, email, 'stopFocusTaskTx', ({ focus, sessions, todos, now }) => {
 		const task = getFocusedTask(focus, taskId);
-		if (task?.sessionStatus === 'running') {
+		if (task) {
 			closeRunningInterval(sessions, todos, taskId, task.sessionStartedAt, reason, now);
 		}
 		return {
@@ -619,9 +565,7 @@ export async function unfocusTx(
 ): Promise<void> {
 	await mutateFocusState(env, email, 'unfocusTx', ({ focus, sessions, todos, now }) => {
 		for (const task of focus?.tasks ?? []) {
-			if (task.sessionStatus === 'running') {
-				closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, reason, now);
-			}
+			closeRunningInterval(sessions, todos, task.taskId, task.sessionStartedAt, reason, now);
 		}
 		return { focus: null, sessions, todos };
 	});
@@ -640,7 +584,7 @@ export async function toggleTodoAndHandleFocusTx(
 
 		if (todo.done) {
 			const focusedTask = getFocusedTask(focus, id);
-			if (focusedTask?.sessionStatus === 'running') {
+			if (focusedTask) {
 				closeRunningInterval(sessions, todos, id, focusedTask.sessionStartedAt, 'done', now);
 			}
 			focus = removeFocusedTask(focus, id);

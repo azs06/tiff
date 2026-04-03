@@ -31,28 +31,19 @@ export function normalizeFocusState(value: MaybeFocusState): FocusState | null {
 	if (!value) return null;
 	if (isLegacyFocusState(value)) return migrateLegacyFocusState(value);
 	if (!Array.isArray(value.tasks) || value.tasks.length === 0) return null;
+	const now = Date.now();
 	const tasks: FocusedTaskState[] = value.tasks
 		.filter((task): task is FocusedTaskState => Boolean(task?.taskId))
 		.map((task) => ({
 			taskId: task.taskId,
-			addedAt: task.addedAt ?? task.lastInteractedAt ?? Date.now(),
-			lastInteractedAt: task.lastInteractedAt ?? task.addedAt ?? Date.now(),
-			sessionStatus: task.sessionStatus === 'paused' ? 'paused' : 'running',
-			sessionElapsedMs: Math.max(0, task.sessionElapsedMs ?? 0),
-			sessionStartedAt:
-				task.sessionStatus === 'running'
-					? task.sessionStartedAt ?? Date.now()
-					: undefined
+			addedAt: task.addedAt ?? task.lastInteractedAt ?? now,
+			lastInteractedAt: task.lastInteractedAt ?? task.addedAt ?? now,
+			sessionStartedAt: task.sessionStartedAt ?? now
 		}));
 	return finalizeFocus(tasks, value.expandedTaskId);
 }
 
 export function migrateLegacyFocusState(legacy: LegacyFocusState): FocusState {
-	const pausedDuration = legacy.sessionPaused && legacy.pausedAt ? Date.now() - legacy.pausedAt : 0;
-	const elapsed = Math.max(
-		0,
-		Date.now() - legacy.focusedAt - (legacy.accumulatedPauseMs ?? 0) - pausedDuration
-	);
 	return {
 		expandedTaskId: legacy.activeTaskId,
 		tasks: [
@@ -60,9 +51,7 @@ export function migrateLegacyFocusState(legacy: LegacyFocusState): FocusState {
 				taskId: legacy.activeTaskId,
 				addedAt: legacy.focusedAt,
 				lastInteractedAt: legacy.focusedAt,
-				sessionStatus: legacy.sessionPaused ? 'paused' : 'running',
-				sessionElapsedMs: elapsed,
-				sessionStartedAt: legacy.sessionPaused ? undefined : legacy.focusedAt
+				sessionStartedAt: legacy.focusedAt
 			}
 		]
 	};
@@ -82,9 +71,7 @@ export function getExpandedFocusedTask(focus: FocusState | null): FocusedTaskSta
 }
 
 export function getSessionElapsed(task: FocusedTaskState, now = Date.now()): number {
-	return task.sessionStatus === 'running'
-		? task.sessionElapsedMs + Math.max(0, now - (task.sessionStartedAt ?? now))
-		: task.sessionElapsedMs;
+	return Math.max(0, now - task.sessionStartedAt);
 }
 
 export function upsertFocusedTask(
@@ -104,8 +91,6 @@ export function upsertFocusedTask(
 		taskId,
 		addedAt: now,
 		lastInteractedAt: now,
-		sessionStatus: 'running',
-		sessionElapsedMs: 0,
 		sessionStartedAt: now
 	};
 	return finalizeFocus([...(focus?.tasks ?? []).map(cloneTask), task], taskId) as FocusState;
@@ -121,40 +106,6 @@ export function expandFocusedTask(
 		task.taskId === taskId ? { ...cloneTask(task), lastInteractedAt: now } : cloneTask(task)
 	);
 	return finalizeFocus(tasks, taskId);
-}
-
-export function pauseFocusedTask(focus: FocusState | null, taskId: string, now = Date.now()): FocusState | null {
-	if (!focus) return null;
-	const tasks = focus.tasks.map((task) => {
-		if (task.taskId !== taskId) return cloneTask(task);
-		const next = cloneTask(task);
-		if (next.sessionStatus === 'running') {
-			next.sessionElapsedMs = getSessionElapsed(next, now);
-			next.sessionStatus = 'paused';
-			delete next.sessionStartedAt;
-		}
-		return next;
-	});
-	return finalizeFocus(tasks, focus.expandedTaskId);
-}
-
-export function resumeFocusedTask(
-	focus: FocusState | null,
-	taskId: string,
-	now = Date.now()
-): FocusState | null {
-	if (!focus) return null;
-	const tasks = focus.tasks.map((task) => {
-		if (task.taskId !== taskId) return cloneTask(task);
-		const next = cloneTask(task);
-		if (next.sessionStatus === 'paused') {
-			next.sessionStatus = 'running';
-			next.sessionStartedAt = now;
-		}
-		next.lastInteractedAt = now;
-		return next;
-	});
-	return finalizeFocus(tasks, focus.expandedTaskId === taskId ? taskId : focus.expandedTaskId);
 }
 
 export function stopFocusedTask(focus: FocusState | null, taskId: string): FocusState | null {

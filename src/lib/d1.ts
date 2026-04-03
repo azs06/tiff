@@ -782,9 +782,9 @@ export async function saveFocus(db: D1Database, email: string, focus: FocusState
 			email,
 			anchorTask.taskId,
 			anchorTask.addedAt,
-			anchorTask.sessionStatus === 'paused' ? 1 : 0,
+			0,
 			null,
-			anchorTask.sessionElapsedMs,
+			0,
 			JSON.stringify(normalized)
 		)
 		.run();

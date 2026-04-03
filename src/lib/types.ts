@@ -96,9 +96,7 @@ export interface FocusedTaskState {
 	taskId: string;
 	addedAt: number;
 	lastInteractedAt: number;
-	sessionStatus: 'running' | 'paused';
-	sessionElapsedMs: number;
-	sessionStartedAt?: number;
+	sessionStartedAt: number;
 }
 
 export interface FocusState {

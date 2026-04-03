@@ -1931,16 +1931,6 @@ body::after {
 	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
 }
 
-.hero-pause-icon.paused {
-	color: var(--accent);
-	border-color: var(--accent);
-	background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.hero-pause-icon.paused:hover {
-	background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
 /* ── Close icon ── */
 
 .hero-close-icon {
@@ -1964,16 +1954,6 @@ body::after {
 	color: var(--hero-text);
 	border-color: var(--hero-text);
 	background: color-mix(in srgb, var(--hero-text) 10%, transparent);
-}
-
-/* ── Session paused state ── */
-
-.focus-session.paused .focus-session-label {
-	color: var(--accent);
-}
-
-.focus-session.paused .focus-elapsed {
-	opacity: 0.6;
 }
 
 .focus-nav-btn {
