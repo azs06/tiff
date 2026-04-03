@@ -45,13 +45,9 @@
 		<span class="tagline">Settings</span>
 	</header>
 
-	<section class="view-page" data-label="FOCUS">
-		<p class="settings-hint">Focus time is tracked automatically from your active sessions.</p>
-	</section>
-
 	<section class="view-page" data-label="THEME">
 		<div class="theme-switcher settings-theme-switcher">
-			{#each THEMES as t}
+			{#each THEMES as t (t)}
 				<button class="theme-btn" class:active={theme === t} onclick={() => setTheme(t)}>{t.toUpperCase()}</button>
 			{/each}
 		</div>
