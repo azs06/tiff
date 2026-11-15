@@ -1,205 +1,208 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import type { Snippet } from 'svelte';
+	import Icon, { type IconName } from '$lib/components/Icon.svelte';
+	import QuickAdd from '$lib/components/QuickAdd.svelte';
+	import TaskDetail from '$lib/components/TaskDetail.svelte';
+	import { dismissToast, toasts } from '$lib/toast.svelte';
+	import { PROJECT_COLORS } from '$lib/types';
+	import { postAction } from '$lib/ui';
 	import type { LayoutData } from './$types';
-	import { THEMES, type Theme } from '$lib/types';
 	import '../app.css';
 
-	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
-	let leftSidebarOpen = $state(true);
-	let sidebarPrefHydrated = false;
-	let leftSidebarEl: HTMLElement | null = null;
-	let mobileSidebarOffset = $state(0);
+	let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-	const SIDEBAR_PREF_KEY = 'tiff-left-sidebar-open';
+	let sidebarOpen = $state(false);
+	let quickAddOpen = $state(false);
+	let searchInput: HTMLInputElement | null = $state(null);
 
-	function isActive(pathname: string, href: string): boolean {
-		return href === '/' ? pathname === '/' : pathname.startsWith(href);
+	const nav: { href: string; label: string; icon: IconName; count?: number }[] = $derived([
+		{ href: '/inbox', label: 'Inbox', icon: 'inbox', count: data.counts.inbox },
+		{ href: '/today', label: 'Today', icon: 'today', count: data.counts.today },
+		{ href: '/upcoming', label: 'Upcoming', icon: 'upcoming' },
+		{ href: '/completed', label: 'Completed', icon: 'completed' }
+	]);
+	const otherProjects = $derived(data.projects.filter((p) => !p.isInbox));
+
+	function isActive(href: string) {
+		return page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
 	}
 
-	function toggleLeftSidebar() {
-		leftSidebarOpen = !leftSidebarOpen;
+	// Apply the saved theme; localStorage lets app.html set it before first paint.
+	$effect(() => {
+		document.documentElement.setAttribute('data-theme', data.user.theme);
+		localStorage.setItem('tiff-theme', data.user.theme);
+	});
+
+	// Adopt the browser's time zone the first time this browser sees an account still on UTC.
+	$effect(() => {
+		const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		const key = `tiff-tz-synced:${data.user.email}`;
+		if (data.user.timezone !== 'UTC' || !browserZone || browserZone === 'UTC' || localStorage.getItem(key)) return;
+		localStorage.setItem(key, '1');
+		void postAction('saveSettings', { timezone: browserZone });
+	});
+
+	// Close the mobile sidebar after navigating.
+	$effect(() => {
+		void page.url.pathname;
+		sidebarOpen = false;
+	});
+
+	function isTyping(target: EventTarget | null) {
+		const el = target as HTMLElement | null;
+		return Boolean(el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)));
 	}
 
-	function updateMobileSidebarOffset() {
-		mobileSidebarOffset = leftSidebarEl?.offsetHeight ?? 0;
+	function onKeydown(event: KeyboardEvent) {
+		if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) return;
+		if (event.key === 'q') {
+			event.preventDefault();
+			quickAddOpen = true;
+		} else if (event.key === '/') {
+			event.preventDefault();
+			sidebarOpen = true;
+			searchInput?.focus();
+		}
 	}
 
-	function resolveTheme(): Theme {
-		const stored = localStorage.getItem('tiff-theme');
-		if (stored && THEMES.includes(stored as Theme)) return stored as Theme;
-		return data.settings.theme;
+	function onSearch(event: SubmitEvent) {
+		event.preventDefault();
+		const q = new FormData(event.currentTarget as HTMLFormElement).get('q');
+		goto(`/search?q=${encodeURIComponent(String(q ?? ''))}`);
 	}
-
-	$effect(() => {
-		if (sidebarPrefHydrated) return;
-		sidebarPrefHydrated = true;
-		const stored = localStorage.getItem(SIDEBAR_PREF_KEY);
-		if (stored === '0') leftSidebarOpen = false;
-	});
-
-	$effect(() => {
-		const nextTheme = resolveTheme();
-		document.documentElement.setAttribute('data-theme', nextTheme);
-		localStorage.setItem('tiff-theme', nextTheme);
-	});
-
-	$effect(() => {
-		if (!sidebarPrefHydrated) return;
-		localStorage.setItem(SIDEBAR_PREF_KEY, leftSidebarOpen ? '1' : '0');
-	});
-
-	$effect(() => {
-		if (!leftSidebarEl) return;
-		updateMobileSidebarOffset();
-		const observer = new ResizeObserver(updateMobileSidebarOffset);
-		observer.observe(leftSidebarEl);
-		window.addEventListener('resize', updateMobileSidebarOffset, { passive: true });
-		return () => {
-			observer.disconnect();
-			window.removeEventListener('resize', updateMobileSidebarOffset);
-		};
-	});
-
-	/* Hide the mobile bottom nav when the virtual keyboard is open */
-	$effect(() => {
-		const vv = window.visualViewport;
-		if (!vv || !leftSidebarEl) return;
-
-		const onViewportResize = () => {
-			const keyboardOpen = window.innerHeight - vv.height > 150;
-			leftSidebarEl?.classList.toggle('keyboard-open', keyboardOpen);
-		};
-
-		vv.addEventListener('resize', onViewportResize, { passive: true });
-		return () => vv.removeEventListener('resize', onViewportResize);
-	});
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
 	<title>TIFF</title>
 </svelte:head>
 
-<div
-	class="app-shell"
-	class:left-sidebar-collapsed={!leftSidebarOpen}
-	style={`--mobile-left-sidebar-offset: ${mobileSidebarOffset}px;`}
->
-	<aside class="left-sidebar" bind:this={leftSidebarEl}>
-		<div class="sidebar-header">
-			<h1><a href="/">TIFF</a></h1>
+<div class="app-shell" class:sidebar-open={sidebarOpen}>
+	<aside class="sidebar">
+		<div class="sidebar-top">
+			<a class="brand" href="/today">TIFF</a>
+			<button class="add-btn" onclick={() => (quickAddOpen = true)} title="Add task (Q)">
+				<Icon name="plus" size={16} />Add task
+			</button>
 		</div>
-		<nav class="left-nav" aria-label="Main navigation">
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/')}
-				href="/"
-				aria-label="Home"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<path d="M3 10.5 12 3l9 7.5" />
-						<path d="M5 9.75V21h5.5v-6h3V21H19V9.75" />
-					</svg>
-				</span>
-				<span class="tab-label">HOME</span>
-			</a>
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/inbox')}
-				href="/inbox"
-				aria-label="Inbox"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<path d="M3.5 5.5h17v11h-4.5l-2 3h-4l-2-3H3.5z" />
-						<path d="M3.5 13.5h5l1.5 2h4l1.5-2h5" />
-					</svg>
-				</span>
-				<span class="tab-label">INBOX</span>
-			</a>
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/projects')}
-				href="/projects"
-				aria-label="Projects"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<path d="M3.5 7.5h6l2 2h9v9.5H3.5z" />
-						<path d="M3.5 7.5V5.5h6l2 2" />
-					</svg>
-				</span>
-				<span class="tab-label">PROJECTS</span>
-			</a>
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/settings')}
-				href="/settings"
-				aria-label="Settings"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<path d="M4 6h3" />
-						<path d="M11 6h9" />
-						<circle cx="9" cy="6" r="2" />
-						<path d="M4 12h8" />
-						<path d="M16 12h4" />
-						<circle cx="14" cy="12" r="2" />
-						<path d="M4 18h11" />
-						<path d="M19 18h1" />
-						<circle cx="17" cy="18" r="2" />
-					</svg>
-				</span>
-				<span class="tab-label">SETTINGS</span>
-			</a>
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/archive')}
-				href="/archive"
-				aria-label="Archive"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<path d="M4 4.5h16v4H4z" />
-						<path d="M5 8.5h14V20H5z" />
-						<path d="M10 12h4" />
-					</svg>
-				</span>
-				<span class="tab-label">ARCHIVE</span>
-			</a>
-			<a
-				class="sidebar-tab"
-				class:active={isActive(page.url.pathname, '/calendar')}
-				href="/calendar"
-				aria-label="Activity"
-			>
-				<span class="tab-icon" aria-hidden="true">
-					<svg viewBox="0 0 24 24">
-						<rect x="4" y="5" width="16" height="15" rx="1.5" />
-						<path d="M4 9h16" />
-						<path d="M8 3.5v3" />
-						<path d="M16 3.5v3" />
-						<path d="M8 13h3" />
-						<path d="M13 13h3" />
-						<path d="M8 17h3" />
-					</svg>
-				</span>
-				<span class="tab-label">ACTIVITY</span>
-			</a>
+
+		<form class="search" role="search" action="/search" onsubmit={onSearch}>
+			<Icon name="search" size={15} />
+			<input
+				bind:this={searchInput}
+				name="q"
+				type="search"
+				placeholder="Search"
+				value={page.url.pathname === '/search' ? (page.url.searchParams.get('q') ?? '') : ''}
+				aria-label="Search tasks"
+			/>
+		</form>
+
+		<nav class="nav" aria-label="Views">
+			{#each nav as item (item.href)}
+				<a class="nav-item" class:active={isActive(item.href)} href={item.href}>
+					<Icon name={item.icon} />
+					<span class="nav-label">{item.label}</span>
+					{#if item.count}<span class="nav-count">{item.count}</span>{/if}
+				</a>
+			{/each}
 		</nav>
+
+		<div class="nav-heading">
+			<a href="/projects">Projects</a>
+			<a class="icon-btn small" href="/projects#new" aria-label="New project"><Icon name="plus" size={15} /></a>
+		</div>
+		<nav class="nav" aria-label="Projects">
+			{#each otherProjects as project (project.id)}
+				<a class="nav-item" class:active={isActive(`/projects/${project.id}`)} href={`/projects/${project.id}`}>
+					<span class="dot" style:background={PROJECT_COLORS[project.color]}></span>
+					<span class="nav-label">{project.name}</span>
+					{#if project.memberCount > 1}<span class="nav-shared"><Icon name="users" size={13} /></span>{/if}
+					{#if project.openCount}<span class="nav-count">{project.openCount}</span>{/if}
+				</a>
+			{:else}
+				<a class="nav-item muted" href="/projects#new">Create a project</a>
+			{/each}
+		</nav>
+
+		{#if data.labels.length}
+			<div class="nav-heading"><span>Labels</span></div>
+			<nav class="nav" aria-label="Labels">
+				{#each data.labels as label (label.name)}
+					<a
+						class="nav-item"
+						class:active={isActive(`/labels/${encodeURIComponent(label.name)}`)}
+						href={`/labels/${encodeURIComponent(label.name)}`}
+					>
+						<Icon name="tag" size={16} />
+						<span class="nav-label">{label.name}</span>
+						{#if label.openCount}<span class="nav-count">{label.openCount}</span>{/if}
+					</a>
+				{/each}
+			</nav>
+		{/if}
+
+		<div class="sidebar-bottom">
+			<a class="nav-item" class:active={isActive('/settings')} href="/settings">
+				<Icon name="settings" />
+				<span class="nav-label">Settings</span>
+			</a>
+			<span class="user-email" title={data.user.email}>{data.user.email}</span>
+		</div>
 	</aside>
 
-	<div class="content-shell">
-		<button
-			type="button"
-			class="left-sidebar-arrow"
-			class:collapsed={!leftSidebarOpen}
-			onclick={toggleLeftSidebar}
-			aria-label={leftSidebarOpen ? 'Hide navigation sidebar' : 'Show navigation sidebar'}
-			aria-expanded={leftSidebarOpen}
-		>
-			<span class="left-sidebar-arrow-icon" aria-hidden="true"></span>
-		</button>
-		{@render children()}
+	<button class="sidebar-scrim" onclick={() => (sidebarOpen = false)} aria-label="Close menu" tabindex="-1"></button>
+
+	<div class="main">
+		<header class="mobile-bar">
+			<button class="icon-btn" onclick={() => (sidebarOpen = true)} aria-label="Open menu"><Icon name="menu" /></button>
+			<a class="brand" href="/today">TIFF</a>
+			<button class="icon-btn" onclick={() => (quickAddOpen = true)} aria-label="Add task"><Icon name="plus" /></button>
+		</header>
+		<main class="content">
+			{@render children()}
+		</main>
 	</div>
+</div>
+
+{#if data.taskDetail}
+	{#key data.taskDetail.task.id}
+		<TaskDetail detail={data.taskDetail} projects={data.projects} today={data.today} user={data.user} />
+	{/key}
+{/if}
+
+{#if quickAddOpen}
+	<div class="modal-backdrop" onclick={() => (quickAddOpen = false)} role="presentation"></div>
+	<div class="modal quick-add-modal" role="dialog" aria-modal="true" aria-label="Add task">
+		<QuickAdd
+			projects={data.projects}
+			today={data.today}
+			projectId={page.params.projectId ?? null}
+			bind:open={quickAddOpen}
+		/>
+		<p class="hint">
+			<code>#Project</code> <code>@label</code> <code>p1</code> <code>tomorrow 5pm</code> <code>every mon</code>
+		</p>
+	</div>
+{/if}
+
+<div class="toasts" aria-live="polite">
+	{#each toasts as item (item.id)}
+		<div class="toast" class:error={item.kind === 'error'}>
+			<span>{item.message}</span>
+			{#if item.action}
+				<button
+					class="link-btn"
+					onclick={() => {
+						item.action?.run();
+						dismissToast(item.id);
+					}}>{item.action.label}</button
+				>
+			{/if}
+			<button class="icon-btn small" onclick={() => dismissToast(item.id)} aria-label="Dismiss"><Icon name="close" size={14} /></button>
+		</div>
+	{/each}
 </div>

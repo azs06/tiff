@@ -1,65 +1,52 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for AI coding assistants working in this repository.
 
-## Project Overview
+## Project overview
 
-TIFF ("Todo In Your Face") is a task-focus-first productivity app with optional Pomodoro timer, built with SvelteKit 2, Svelte 5, and TypeScript, deployed to Cloudflare Workers. Designed for multi-task context switching workflows — focus on a task, log progress, switch between tasks without losing context, track how long features take.
+TIFF is a shared, Todoist-style task manager with an MCP server, built with SvelteKit 2, Svelte 5 and TypeScript, deployed to Cloudflare Workers with D1 and R2.
 
 ## Commands
 
 ```bash
-npm run dev          # Local dev server (Cloudflare platform proxy persists KV to .wrangler/state/)
-npm run build        # Production build for Cloudflare Workers
-npm run deploy       # Build + deploy to Cloudflare Workers
-npm run check        # Type checking (svelte-kit sync + svelte-check)
-npm run check:watch  # Type checking in watch mode
+npm run dev          # Applies local D1 migrations, then starts Vite (state persists in .wrangler/state/)
+npm run build        # Production build
+npm run deploy       # Build + wrangler deploy
+npm run check        # svelte-kit sync + svelte-check
 ```
 
 No test framework is configured.
 
 ## Architecture
 
-**Stack:** SvelteKit 2 + Svelte 5 (runes API) + TypeScript (strict) + Cloudflare Workers + Cloudflare D1 + KV + R2
+**Auth (`src/hooks.server.ts`):**
+- `/mcp` uses `Authorization: Bearer tiff_...` personal API tokens (`src/lib/server/tokens.ts`), even in dev.
+- Everything else uses the Cloudflare Access JWT. Dev mode signs in as `dev@localhost`.
+- Emails are lowercased and stored on `event.locals.userEmail`.
 
-**Auth:** Cloudflare Access JWT parsed in `src/hooks.server.ts`. In dev mode, hardcodes `dev@localhost`. Email is set on `event.locals.userEmail` for per-user data isolation.
+**Service layer (`src/lib/server/`):** all business rules and access checks live here. Form actions and MCP tools both call it; never query D1 from routes or components.
+- `context.ts` builds a per-request `ServiceContext` (`db`, `user`, `today` in the user's time zone) and creates the user and their Inbox on first visit.
+- `projects.ts` covers projects, sections, members and permissions (`requireEditor`, `requireOwner`).
+- `tasks.ts` covers tasks, labels, comments, completion and recurrence, and quick add.
+- `attachments.ts` handles R2 uploads and downloads.
+- `actions.ts` holds every form action. Each `+page.server.ts` re-exports `sharedActions`, so any form can post to `?/actionName`.
+- `mcp.ts` defines the MCP server and tools. `src/routes/mcp/+server.ts` serves it with `createMcpHandler`.
+- Throw `ServiceError` (`errors.ts`) for user-facing failures. Actions turn it into `fail()`, and MCP turns it into `isError` results.
 
-**Data layer (`src/lib/storage.ts`):** Persistence routes through D1-first storage helpers:
-- Primary relational storage in D1 (`TIFF_DB`)
-- KV (`TIFF_KV`) retained for GitHub cache and legacy timer compatibility
-- R2 (`TIFF_ATTACHMENTS`) for binary attachments
+**Access model:** every query joins `project_members` on the current user's email. Owners and editors can edit tasks, sections, comments and attachments. Only owners can archive or delete a project or manage members. The Inbox (`projects.is_inbox = 1`) can't be shared, renamed or deleted.
 
-Legacy KV key schema (still relevant for cache/legacy compatibility):
-- `todos:{email}` — todo list (includes archived todos, task logs, resources, projectId, totalFocusMs inline)
-- `pomodoros:{email}` — completed pomodoro session logs
-- `focus:{email}` — active focus state (which task is focused + optional pomodoro sub-state)
-- `sessions:{email}` — focus session history (auto-tracked start/end times per task)
-- `projects:{email}` — user's project list
-- `settings:{email}` — user settings (timer durations, theme)
+**Data model (`migrations/0005_task_app.sql`):** `users`, `projects`, `project_members`, `sections`, `tasks` (with `parent_id` for one level of subtasks), `task_labels`, `comments`, `attachments` and `api_tokens`. Due dates are floating local dates (`YYYY-MM-DD`) plus an optional `HH:MM`. D1 enforces foreign keys, and deletes cascade.
 
-**Focus model:** The primary concept is "focus" not "timer". Focusing a task starts an auto-tracked session. The Pomodoro timer is an optional compact widget within a focus session. `FocusState` contains `activeTaskId`, `focusedAt`, and an optional `pomodoro` sub-object.
+**Shared pure modules (client and server):**
+- `src/lib/dates.ts`: date arithmetic on UTC midnights.
+- `src/lib/recurrence.ts`: parses and advances rules like "every mon, fri".
+- `src/lib/quickadd.ts`: natural-language parser, used for the live preview and on the server.
 
-**Projects:** Optional grouping. Tasks have an optional `projectId`. Tasks without a project appear under "GLOBAL". Projects are a flat list (no nesting).
+**UI:** `src/routes/+layout.svelte` holds the sidebar, the task detail modal (opened by the `?task=<id>` query param on any page), the global quick add and toasts. Components are in `src/lib/components/`. `src/lib/ui.ts` has `enhanced()` for `use:enhance` with error toasts, and `postAction()` for formless action calls.
 
-**Server actions (`src/routes/+page.server.ts`):** 20 form actions — `create`, `toggle`, `delete`, `update`, `logPomodoro`, `syncFocus`, `focusTask`, `unfocus`, `archive`, `unarchive`, `saveSettings`, `saveTheme`, `addLog`, `deleteLog`, `addResource`, `deleteResource`, `createProject`, `deleteProject`, `setTaskProject` — all using SvelteKit's `use:enhance` for progressive enhancement.
+## Conventions
 
-**Focus (`src/routes/+page.svelte`):** Focus state and optional Pomodoro timer logic is client-side using Svelte 5 runes. Focus state hydrates from server storage on load, then syncs back via hidden forms. Session tracking (start/end) happens server-side via `focusTask`/`unfocus` actions.
-
-**Types (`src/lib/types.ts`):** Shared interfaces — `Todo`, `FocusState`, `FocusSession`, `Project`, `PomodoroLog`, `UserSettings`, `Theme`, `TaskLog`, `Resource`, `TimerState` (legacy compatibility only). Also exports `DEFAULT_SETTINGS` and `THEMES`.
-
-**Pomodoro config (`src/lib/pomodoro.ts`):** `nextInterval()` logic (break type based on completed count). Default durations come from `DEFAULT_SETTINGS` in types.
-
-**Calendar (`src/lib/Calendar.svelte`):** Activity heatmap component showing pomodoro counts and deadline markers per day, displayed in the sidebar.
-
-**Five hidden forms** in `+page.svelte` handle background server syncing: `logPomodoro`, `syncFocus`, `saveTheme`, `focusTask`, `unfocus` — all submitted programmatically without page invalidation.
-
-## Style Conventions
-
-- Svelte 5 runes API (`$state()`, `$derived`, `$effect`, `$props()`) — not legacy reactive syntax
-- Three themes (`signal`, `paper`, `nothing`) controlled by `data-theme` attribute on `<html>`, persisted through the primary storage layer
-- All CSS in `src/app.css` using custom properties (`--bg-deep`, `--bg-panel`, `--bg-surface`, `--bg-elevated`, `--text-primary`, `--text-muted`, `--text-dim`, `--accent`, `--accent-dark`, `--danger`, `--border-color`, `--font`, `--font-display`, `--hero-bg`, `--hero-text`)
-- Theme overrides use `[data-theme="paper"]` and `[data-theme="nothing"]` selectors with per-theme clean minimal styling (nothing) and texture/typography effects (paper)
-- Hero section uses `.hero-focus` class with compact pomodoro pill (`.pomo-pill`), session elapsed counter, and quick log form
-- Tasks grouped by project using `.task-group` and `.task-group-header` classes
-- ALL CAPS text throughout, uppercase letter-spacing on labels and buttons
-- Single-page app — all routes live under `src/routes/` with one page
+- Svelte 5 runes only (`$state`, `$derived`, `$effect`, `$props`).
+- Edit forms use `enhanced()` (no reset) and autosave with `onchange` + `requestSubmit()`.
+- All CSS is in `src/app.css`. Themes (`signal`, `paper`, `nothing`) are set by `data-theme` on `<html>`.
+- Add schema changes as new migration files. Never edit an applied migration.
