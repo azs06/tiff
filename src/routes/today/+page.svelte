@@ -2,7 +2,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import QuickAdd from '$lib/components/QuickAdd.svelte';
 	import TaskList from '$lib/components/TaskList.svelte';
-	import { formatDayHeading } from '$lib/dates';
+	import { formatShortDate } from '$lib/dates';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -17,7 +17,7 @@
 	<div class="view-title">
 		<Icon name="today" size={22} />
 		<h1>Today</h1>
-		<span class="muted">{formatDayHeading(data.today, data.today)}</span>
+		<span class="view-subtitle">{formatShortDate(data.today)}</span>
 	</div>
 </header>
 

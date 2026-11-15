@@ -73,6 +73,13 @@
 		if (event.key === 'Escape') close();
 	}
 
+	const PRIORITIES = [
+		{ value: 1, label: 'Urgent' },
+		{ value: 2, label: 'High' },
+		{ value: 3, label: 'Medium' },
+		{ value: 4, label: 'None' }
+	] as const;
+
 	const presets = $derived([
 		{ label: 'Today', date: today },
 		{ label: 'Tomorrow', date: addDays(today, 1) },
@@ -141,7 +148,7 @@
 			</div>
 
 			{#if task.recurrence && task.dueDate}
-				<p class="hint"><Icon name="repeat" size={13} /> Repeats {task.recurrence}. Completing it moves it to the next date.</p>
+				<p class="hint detail-hint"><Icon name="repeat" size={13} /> Repeats {task.recurrence}. Completing it moves it to the next date.</p>
 			{/if}
 
 			{#if !task.parentId}
@@ -247,7 +254,7 @@
 							<button type="button" class="chip-btn" onclick={() => setSchedule(null)}>No date</button>
 						{/if}
 					</div>
-					<div class="row">
+					<div class="row date-time">
 						<input type="date" name="dueDate" value={task.dueDate ?? ''} bind:this={dateInput} aria-label="Due date" />
 						<input type="time" name="dueTime" value={task.dueTime ?? ''} bind:this={timeInput} aria-label="Due time" />
 					</div>
@@ -263,15 +270,17 @@
 
 			<form method="POST" action="?/updateTask" use:enhance={enhanced()} onchange={submitOnChange}>
 				<input type="hidden" name="taskId" value={task.id} />
-				<label class="field">
-					<span>Priority</span>
-					<select name="priority" value={String(task.priority)}>
-						<option value="1">P1 · Urgent</option>
-						<option value="2">P2 · High</option>
-						<option value="3">P3 · Medium</option>
-						<option value="4">P4 · None</option>
-					</select>
-				</label>
+				<fieldset class="field">
+					<legend>Priority</legend>
+					<div class="priority-picker">
+						{#each PRIORITIES as p (p.value)}
+							<label class="priority-option p{p.value}" title={p.label}>
+								<input type="radio" name="priority" value={p.value} checked={task.priority === p.value} />
+								<Icon name="flag" size={14} /><span>P{p.value}</span>
+							</label>
+						{/each}
+					</div>
+				</fieldset>
 			</form>
 
 			<form method="POST" action="?/updateTask" use:enhance={enhanced()} onchange={submitOnChange}>

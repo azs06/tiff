@@ -147,13 +147,20 @@ export function formatDue(date: string, time: string | null, today: string): str
 }
 
 /** Long heading, e.g. "Tue 17 Nov · Tomorrow". */
-export function formatDayHeading(date: string, today: string): string {
+/** "Mon 16 Nov" */
+export function formatShortDate(date: string): string {
 	const value = toUtc(date);
-	const base = `${WEEKDAY_NAMES[value.getUTCDay()].slice(0, 3)} ${value.getUTCDate()} ${MONTH_NAMES[value.getUTCMonth()].slice(0, 3)}`;
+	return `${WEEKDAY_NAMES[value.getUTCDay()].slice(0, 3)} ${value.getUTCDate()} ${MONTH_NAMES[value.getUTCMonth()].slice(0, 3)}`;
+}
+
+/** "Today · Mon 16 Nov", "Tomorrow · Tue 17 Nov", "Yesterday · Sun 15 Nov", or "Wed 18 Nov". */
+export function formatDayHeading(date: string, today: string): string {
+	const base = formatShortDate(date);
 	const diff = daysBetween(today, date);
-	if (diff === 0) return `${base} · Today`;
-	if (diff === 1) return `${base} · Tomorrow`;
-	return `${base} · ${WEEKDAY_NAMES[value.getUTCDay()]}`;
+	if (diff === 0) return `Today · ${base}`;
+	if (diff === 1) return `Tomorrow · ${base}`;
+	if (diff === -1) return `Yesterday · ${base}`;
+	return base;
 }
 
 export function dateFromTimestamp(timestamp: number, timeZone: string): string {

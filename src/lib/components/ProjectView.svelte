@@ -225,7 +225,8 @@
 							<button type="button" class="btn ghost" onclick={() => (renamingSection = null)}>Cancel</button>
 						</form>
 					{:else}
-						<h2>{group.name} <span class="count">{group.tasks.filter((t) => !t.completedAt && !t.parentId).length}</span></h2>
+						{@const open = group.tasks.filter((t) => !t.completedAt && !t.parentId).length}
+						<h2>{group.name} {#if open}<span class="count">{open}</span>{/if}</h2>
 						{#if !archived}
 							<div class="group-actions">
 								<button class="link-btn" onclick={() => (renamingSection = group.id)}>Rename</button>

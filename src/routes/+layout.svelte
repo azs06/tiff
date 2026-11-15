@@ -183,7 +183,7 @@
 			projectId={page.params.projectId ?? null}
 			bind:open={quickAddOpen}
 		/>
-		<p class="hint">
+		<p class="hint syntax-hint">
 			<code>#Project</code> <code>@label</code> <code>p1</code> <code>tomorrow 5pm</code> <code>every mon</code>
 		</p>
 	</div>
