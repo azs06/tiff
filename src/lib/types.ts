@@ -1,124 +1,129 @@
-export interface TaskLog {
-	id: string;
-	text: string;
-	createdAt: number;
-}
-
-export interface Resource {
-	id: string;
-	url: string;
-	label?: string;
-	createdAt: number;
-}
-
-export interface Todo {
-	id: string;
-	title: string;
-	done: boolean;
-	createdAt: number;
-	detail?: string;
-	deadline?: number;
-	archived?: boolean;
-	archivedAt?: number;
-	logs?: TaskLog[];
-	projectId?: string;
-	totalFocusMs?: number;
-}
-
-export interface ProjectAttachment {
-	id: string;
-	name: string;
-	url: string;
-	key?: string;
-	contentType?: string;
-	size?: number;
-	createdAt: number;
-}
-
-export interface ProjectGitHubRepo {
-	id: string;
-	projectId: string;
-	fullName: string;
-	owner: string;
-	repo: string;
-	isPrimary: boolean;
-	createdAt: number;
-}
-
-export interface Project {
-	id: string;
-	name: string;
-	createdAt: number;
-	detail?: string;
-	resources?: Resource[];
-	attachments?: ProjectAttachment[];
-	githubRepos?: ProjectGitHubRepo[];
-	archived?: boolean;
-	archivedAt?: number;
-}
-
-export function getPrimaryProjectGitHubRepo(
-	project: Pick<Project, 'githubRepos'> | null | undefined
-): ProjectGitHubRepo | undefined {
-	const repos = project?.githubRepos;
-	if (!repos || repos.length === 0) return undefined;
-
-	return (
-		repos.find((repo) => repo.isPrimary) ??
-		[...repos].sort((a, b) => a.createdAt - b.createdAt)[0]
-	);
-}
-
-export interface GitHubRepoInfo {
-	fullName: string;
-	description: string | null;
-	defaultBranch: string;
-	lastPushedAt: string;
-	stars: number;
-	openIssueCount: number;
-	lastMergedPr: { number: number; title: string; mergedAt: string; url: string } | null;
-	fetchedAt: number;
-	error?: string;
-	readmeContent?: string;
-	readmeFetchedAt?: number;
-	readmeUpdatedAt?: string;
-}
-
-export interface FocusSession {
-	id: string;
-	taskId: string;
-	startedAt: number;
-	endedAt?: number;
-	endReason?: 'switch' | 'done' | 'manual' | 'pause';
-}
-
-export interface FocusedTaskState {
-	taskId: string;
-	addedAt: number;
-	lastInteractedAt: number;
-	sessionStartedAt: number;
-}
-
-export interface FocusState {
-	expandedTaskId: string | null;
-	tasks: FocusedTaskState[];
-}
-
-export interface LegacyFocusState {
-	activeTaskId: string;
-	focusedAt: number;
-	sessionPaused?: boolean;
-	pausedAt?: number;
-	accumulatedPauseMs?: number;
-}
-
 export type Theme = 'signal' | 'paper' | 'nothing';
 export const THEMES: Theme[] = ['signal', 'paper', 'nothing'];
 
-export interface UserSettings {
-	theme: Theme;
+export type Priority = 1 | 2 | 3 | 4;
+export type ProjectRole = 'owner' | 'editor';
+
+export const PROJECT_COLORS = {
+	grey: '#8a8a8a',
+	red: '#d1453b',
+	orange: '#eb8909',
+	yellow: '#d6a800',
+	green: '#299438',
+	teal: '#158fad',
+	blue: '#246fe0',
+	purple: '#884dff',
+	pink: '#e05194'
+} as const;
+
+export type ProjectColor = keyof typeof PROJECT_COLORS;
+export const PROJECT_COLOR_NAMES = Object.keys(PROJECT_COLORS) as ProjectColor[];
+
+export function isProjectColor(value: unknown): value is ProjectColor {
+	return typeof value === 'string' && value in PROJECT_COLORS;
 }
 
-export const DEFAULT_SETTINGS: UserSettings = {
-	theme: 'signal'
-};
+export interface User {
+	email: string;
+	theme: Theme;
+	timezone: string;
+	inboxProjectId: string;
+}
+
+export interface ProjectSummary {
+	id: string;
+	name: string;
+	color: ProjectColor;
+	isInbox: boolean;
+	ownerEmail: string;
+	role: ProjectRole;
+	archivedAt: number | null;
+	openCount: number;
+	memberCount: number;
+}
+
+export interface Section {
+	id: string;
+	projectId: string;
+	name: string;
+	sortOrder: number;
+}
+
+export interface ProjectMember {
+	email: string;
+	role: ProjectRole;
+	addedAt: number;
+}
+
+export interface Attachment {
+	id: string;
+	projectId: string;
+	name: string;
+	contentType: string | null;
+	size: number;
+	uploadedBy: string;
+	createdAt: number;
+}
+
+export interface ProjectDetail extends ProjectSummary {
+	notes: string | null;
+	sections: Section[];
+	members: ProjectMember[];
+	attachments: Attachment[];
+}
+
+export interface Task {
+	id: string;
+	projectId: string;
+	projectName: string;
+	projectColor: ProjectColor;
+	sectionId: string | null;
+	parentId: string | null;
+	title: string;
+	notes: string | null;
+	priority: Priority;
+	dueDate: string | null;
+	dueTime: string | null;
+	recurrence: string | null;
+	assigneeEmail: string | null;
+	sortOrder: number;
+	completedAt: number | null;
+	completedBy: string | null;
+	createdBy: string;
+	createdAt: number;
+	updatedAt: number;
+	labels: string[];
+	subtaskCount: number;
+	subtaskDoneCount: number;
+	commentCount: number;
+}
+
+export interface Comment {
+	id: string;
+	taskId: string;
+	authorEmail: string;
+	body: string;
+	createdAt: number;
+}
+
+export interface LabelSummary {
+	name: string;
+	openCount: number;
+}
+
+export interface ApiToken {
+	id: string;
+	name: string;
+	prefix: string;
+	createdAt: number;
+	lastUsedAt: number | null;
+}
+
+export interface TaskDetail {
+	task: Task;
+	parent: Task | null;
+	subtasks: Task[];
+	comments: Comment[];
+	sections: Section[];
+	members: ProjectMember[];
+}

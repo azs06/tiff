@@ -1,30 +1,33 @@
-# TIFF - Todo In Your Focus
+# TIFF
 
-TIFF is a personal focus-first task manager built with SvelteKit and deployed on Cloudflare Workers. It combines inbox capture, project organization, focus session tracking, lightweight work logs, and project context in a single app.
-
-![TIFF product screenshot](./product-image.png)
+TIFF is a shared task manager in the style of Todoist and Wunderlist, with a built-in MCP server so AI assistants can read and manage your tasks. It is built with SvelteKit and runs on Cloudflare Workers with D1 and R2.
 
 ## Features
 
-- Focus mode with a live session timer, pause/resume controls, and quick switching between currently focused tasks.
-- Inbox and task queue flows for creating, editing, completing, deleting, archiving, and restoring tasks.
-- Deadlines with quick presets for today, tomorrow, or a custom date/time.
-- Per-task notes and markdown-friendly activity logs.
-- Focus session history with total tracked time and day-by-day activity summaries.
-- Project hub for grouping tasks and maintaining project details.
-- Project resources and file attachments backed by Cloudflare R2.
-- GitHub repo linking per project, including cached repo stats, latest merged PR context, and README sync/copy/download actions.
-- Activity calendar view for reviewing completed focus sessions over time.
-- Theme settings for switching between the included visual styles.
-- Cloudflare Access JWT validation in production, with a local development bypass using `dev@localhost`.
+- **Views:** Inbox, Today (with overdue), Upcoming (next 14 days), Completed, per-project, per-label, and search.
+- **Quick add** with natural language, parsed live as you type:
+  `Pay rent every month on 1 dec p1 #Home @bills`
+  - `#Project` picks the project (multi-word names work when the project exists)
+  - `@label` adds labels
+  - `p1`–`p4` sets priority
+  - dates: `today`, `tomorrow`, `fri`, `next week`, `weekend`, `in 3 days`, `jan 5`, `2027-01-05`
+  - times: `5pm`, `17:30`, `noon`
+  - recurrence: `daily`, `every 2 weeks`, `every other month`, `every weekday`, `every mon, wed and fri`
+- **Tasks:** notes, priority, due date and time, recurrence, labels, one level of subtasks, comments, assignee.
+- **Recurring tasks:** completing one moves it to its next date and resets its subtasks.
+- **Projects:** colors, notes, sections, drag-and-drop ordering, file attachments (R2), archive.
+- **Sharing:** the owner shares a project by email. Members can edit tasks, sections, comments and files; only the owner can archive, delete or manage members.
+- **MCP server** at `/mcp`, authenticated with personal API tokens.
+- **Keyboard:** `q` opens quick add, `/` focuses search, `Esc` closes dialogs.
+- Three themes: signal, paper, nothing.
 
 ## Stack
 
-- SvelteKit + Svelte
-- Cloudflare Workers
-- Cloudflare D1 as the primary datastore
-- Cloudflare KV for cached GitHub metadata / compatibility storage
+- SvelteKit 2 + Svelte 5 on Cloudflare Workers
+- Cloudflare D1 for all data
 - Cloudflare R2 for project attachments
+- Cloudflare Access for web sign-in
+- `@modelcontextprotocol/server` (MCP SDK v2) for the MCP endpoint
 
 ## Local development
 
@@ -33,59 +36,70 @@ npm install
 npm run dev
 ```
 
-`npm run dev` applies pending local D1 migrations before starting Vite.
+`npm run dev` applies pending local D1 migrations before starting Vite. In development the web app signs you in as `dev@localhost`. The `/mcp` endpoint still requires an API token, which you can create on the Settings page.
 
-During local development, `src/hooks.server.ts` bypasses Cloudflare Access validation and signs requests in as `dev@localhost`.
+## Cloudflare setup
 
-## Required Cloudflare setup
+1. Create a D1 database and set `database_id` in `wrangler.toml`.
+2. Create an R2 bucket and set `bucket_name` for `TIFF_ATTACHMENTS`.
+3. Apply migrations:
 
-Update `wrangler.toml` with your own resources:
+   ```sh
+   npx wrangler d1 migrations apply tiff --remote
+   ```
 
-1. Create a D1 database and set `database_id`.
-2. Create a KV namespace and set the `TIFF_KV` namespace id.
-3. Create an R2 bucket and set the `TIFF_ATTACHMENTS` bucket names.
+   Migration `0005_task_app.sql` drops every table from the earlier focus-tracker version of TIFF. Existing data is deleted.
 
-Apply database migrations:
+4. Deploy:
 
-```sh
-npx wrangler d1 migrations apply tiff --local
-npx wrangler d1 migrations apply tiff --remote
-```
+   ```sh
+   npm run deploy
+   ```
 
-## Optional GitHub integration
+## Cloudflare Access
 
-Project repo sync uses a `GITHUB_TOKEN` Worker secret. Without it, linked repositories remain visible but remote sync and README refresh are unavailable.
+The web app requires a valid Cloudflare Access JWT in production.
 
-```sh
-npx wrangler secret put GITHUB_TOKEN
-```
+1. In Cloudflare Zero Trust, create an Access application for the Worker hostname.
+2. Add an `Allow` policy for everyone who should use TIFF, including people you share projects with.
+3. Save the team domain and the application audience (`AUD`) as Worker secrets:
 
-## Deploy
+   ```sh
+   npx wrangler secret put CF_ACCESS_TEAM_DOMAIN   # e.g. https://your-team.cloudflareaccess.com
+   npx wrangler secret put CF_ACCESS_AUD
+   ```
 
-```sh
-npm run build
-npm run deploy
-```
+4. **Exclude `/mcp` from Access.** MCP clients authenticate with Bearer tokens and cannot complete an Access login. Add a second Access application for the path `your-host/mcp` with a `Bypass` policy for `Everyone`. TIFF still rejects any `/mcp` request without a valid token.
 
-## Cloudflare Zero Trust Access
+If either secret is missing, the app returns `500`. Requests without a valid Access JWT get `401` or `403`.
 
-Production requests are protected with Cloudflare Access JWT validation.
+## Sharing
 
-1. In Cloudflare Zero Trust, create an Access application for your deployed Worker hostname.
-2. Add at least one `Allow` policy for your users or groups.
-3. Copy your team domain, for example `https://your-team.cloudflareaccess.com`.
-4. Copy the application audience (`AUD`) from the Access app.
-5. Save both values as Worker secrets:
+Project owners add members by email in the project's **Share & details** panel. The person sees the project the next time they sign in with that email through Cloudflare Access. There is no invitation step, so the Access policy decides who can sign in at all.
 
-```sh
-npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
-npx wrangler secret put CF_ACCESS_AUD
-```
+## MCP
 
-6. Redeploy the app:
+Create a token under **Settings → API tokens & MCP**. The token is shown once and is stored only as a SHA-256 hash. Each token acts as you, with full access to everything you can see.
+
+Claude Code:
 
 ```sh
-npm run deploy
+claude mcp add --transport http tiff https://your-host/mcp --header "Authorization: Bearer tiff_..."
 ```
 
-If either secret is missing, the app returns `500`. Requests without a valid Access JWT return `401` or `403`.
+Other clients (Cursor, VS Code and similar):
+
+```json
+{
+  "mcpServers": {
+    "tiff": {
+      "url": "https://your-host/mcp",
+      "headers": { "Authorization": "Bearer tiff_..." }
+    }
+  }
+}
+```
+
+Tools: `get_context`, `list_projects`, `get_project`, `create_project`, `update_project`, `create_section`, `share_project`, `list_tasks`, `get_task`, `quick_add_task`, `create_task`, `update_task`, `complete_task`, `reopen_task`, `move_task`, `delete_task`, `add_comment`, `list_labels`.
+
+The endpoint is stateless Streamable HTTP. It serves both the 2025-era protocol that current clients use and the newer per-request protocol.
